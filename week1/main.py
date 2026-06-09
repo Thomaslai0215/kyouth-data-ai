@@ -1,30 +1,22 @@
 from pathlib import Path
 
 from src.ingestor import ingest_all_mhtml
-from src.loader import load_all_jsons
-from src.profiler import run_data_profile
-from src.processor import process_all_html
 
-SOURCE_DIR = Path("data/0_source")
-BRONZE_DIR = Path("data/1_bronze")
-SILVER_DIR = Path("data/2_silver")
-GOLD_DIR = Path("data/3_gold")
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+SOURCE_DIR = DATA_DIR / "0_source"
+BRONZE_DIR = DATA_DIR / "1_bronze"
+SILVER_DIR = DATA_DIR / "2_silver"
+GOLD_DIR = DATA_DIR / "3_gold"
 DB_NAME = "jobs.db"
 
 
-def run_profiler() -> None:
-    db_path = GOLD_DIR / DB_NAME
-    run_data_profile(db_path)
+# def run_profiler() -> None:
 
+# def run_gold() -> None:
+    
 
-def run_gold() -> None:
-    load_all_jsons(SILVER_DIR, GOLD_DIR)
-
-
-def run_silver() -> None:
-    input_dir = BRONZE_DIR
-    output_dir = SILVER_DIR
-    process_all_html(input_dir, output_dir)
+# def run_silver() -> None:
 
 
 def run_bronze() -> None:
@@ -35,9 +27,9 @@ def run_bronze() -> None:
 
 def main() -> None:
     run_bronze()
-    run_silver()
-    run_gold()
-    run_profiler()
+    # run_silver()
+    # run_gold()
+    # run_profiler()
 
 
 if __name__ == "__main__":
