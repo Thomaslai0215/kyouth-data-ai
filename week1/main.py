@@ -1,6 +1,9 @@
+import sys
 from pathlib import Path
 
 from src.ingestor import ingest_all_mhtml
+from src.processor import process_all_html
+from src.loader import load_all_jsons
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -11,12 +14,16 @@ GOLD_DIR = DATA_DIR / "3_gold"
 DB_NAME = "jobs.db"
 
 
-# def run_profiler() -> None:
+def run_gold() -> None:
+    input_dir = SILVER_DIR
+    output_dir = GOLD_DIR
+    load_all_jsons(input_dir, output_dir)
 
-# def run_gold() -> None:
-    
 
-# def run_silver() -> None:
+def run_silver() -> None:
+    input_dir = BRONZE_DIR
+    output_dir = SILVER_DIR
+    process_all_html(input_dir, output_dir)
 
 
 def run_bronze() -> None:
@@ -26,10 +33,23 @@ def run_bronze() -> None:
 
 
 def main() -> None:
-    run_bronze()
-    # run_silver()
-    # run_gold()
-    # run_profiler()
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+        if command == "ingest":
+            run_bronze()
+        elif command == "process":
+            run_silver()
+        elif command == "load":
+            run_gold()
+        else:
+            print(f"Unknown command: {command}")
+            print("Available commands: ingest, process, load")
+            sys.exit(1)
+    else:
+        # Default: run all
+        run_bronze()
+        run_silver()
+        run_gold()
 
 
 if __name__ == "__main__":
