@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -5,6 +6,11 @@ from src.ingestor import ingest_all_mhtml
 from src.processor import process_all_html
 from src.loader import load_all_jsons
 from src.profiler import run_data_profile
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -58,7 +64,6 @@ def main() -> None:
             print_usage()
             sys.exit(1)
     else:
-        # Show usage if no command provided
         print_usage()
         sys.exit(1)
 

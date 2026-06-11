@@ -1,11 +1,14 @@
 import json
+import logging
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, field_validator, ValidationError
 
+logger = logging.getLogger(__name__)
 
-class JobRecord(BaseModel):
+
+class JobListing(BaseModel):
     source_id: str
     job_title: str
     company: str
@@ -15,7 +18,7 @@ class JobRecord(BaseModel):
     @classmethod
     def cannot_be_empty(cls, v: str) -> str:
         value = v.strip()
-        if not value or value in {"-", "n/a", "none",}:
+        if not value:
             raise ValueError("Field cannot be empty")
         return value
 
@@ -34,21 +37,19 @@ def _extract_meta(soup: BeautifulSoup, name: str, attr: str = "property") -> str
 def _extract_fields(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
-    # source_id from og:url
     og_url = _extract_meta(soup, "og:url") or ""
     source_id = og_url.rstrip("/").split("/")[-1] if og_url else ""
 
     descriptions_tag = soup.find(attrs={"data-automation": "jobAdDetails"})
-    description = descriptions_tag.get_text(separator="\n", strip=True) if descriptions_tag else ""
+    description = (
+        descriptions_tag.get_text(separator=" ", strip=True) if descriptions_tag else ""
+    )
 
-
-    # job_title via data-automation="job-detail-title"
     title_tag = soup.find(attrs={"data-automation": "job-detail-title"})
-    job_title = title_tag.get_text(strip=True) if title_tag else ""
+    job_title = title_tag.get_text(separator=" ", strip=True) if title_tag else ""
 
-    # company via data-automation="advertiser-name"
     company_tag = soup.find(attrs={"data-automation": "advertiser-name"})
-    company = company_tag.get_text(strip=True) if company_tag else ""
+    company = company_tag.get_text(separator=" ", strip=True) if company_tag else ""
 
     return {
         "source_id": source_id,
@@ -58,9 +59,9 @@ def _extract_fields(html: str) -> dict:
     }
 
 
-def _validate_record(fields: dict) -> tuple[JobRecord | None, str | None]:
+def _validate_record(fields: dict) -> tuple[JobListing | None, str | None]:
     try:
-        record = JobRecord(**fields)
+        record = JobListing(**fields)
         return record, None
     except ValidationError as e:
         error_str = str(e).lower()
@@ -70,7 +71,7 @@ def _validate_record(fields: dict) -> tuple[JobRecord | None, str | None]:
         return None, "unknown"
 
 
-def _save_json(output_path: Path, record: JobRecord) -> None:
+def _save_json(output_path: Path, record: JobListing) -> None:
     output_path.write_text(
         json.dumps(record.model_dump(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -87,7 +88,7 @@ def process_all_html(input_dir: Path, output_dir: Path) -> None:
     skipped = 0
 
     if total == 0:
-        print("⚠️ No HTML files found to process.")
+        logger.warning("No HTML files found to process.")
         print("\n📊 Silver Summary:")
         print(f"Total: 0 | Processed: 0 | Skipped: 0")
         return
@@ -96,16 +97,19 @@ def process_all_html(input_dir: Path, output_dir: Path) -> None:
         html = _read_html(html_path)
         fields = _extract_fields(html)
         record, error_field = _validate_record(fields)
+        output_path = output_dir / f"{html_path.stem}.json"
 
         if record is None:
             skipped += 1
-            print(f"⚠️ Missing {error_field} in: {html_path.name}")
+            if output_path.exists():
+                output_path.unlink()
+            logger.warning(f"Missing {error_field} in: {html_path.name}")
             continue
 
-        output_path = output_dir / f"{html_path.stem}.json"
         _save_json(output_path, record)
         processed += 1
-        print(f"✅ Processed: {html_path.name}")
+        logger.info(f"Processed file: {html_path.name}")
 
     print("\n📊 Silver Summary:")
     print(f"Total: {total} | Processed: {processed} | Skipped: {skipped}")
+    print()
