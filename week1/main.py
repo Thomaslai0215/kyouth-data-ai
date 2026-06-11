@@ -4,6 +4,7 @@ from pathlib import Path
 from src.ingestor import ingest_all_mhtml
 from src.processor import process_all_html
 from src.loader import load_all_jsons
+from src.profiler import run_data_profile
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -11,7 +12,11 @@ SOURCE_DIR = DATA_DIR / "0_source"
 BRONZE_DIR = DATA_DIR / "1_bronze"
 SILVER_DIR = DATA_DIR / "2_silver"
 GOLD_DIR = DATA_DIR / "3_gold"
-DB_NAME = "jobs.db"
+DB_PATH = GOLD_DIR / "jobs.db"
+
+
+def run_profiler() -> None:
+    run_data_profile(DB_PATH)
 
 
 def run_gold() -> None:
@@ -41,15 +46,25 @@ def main() -> None:
             run_silver()
         elif command == "load":
             run_gold()
+        elif command == "profile":
+            run_profiler()
+        elif command == "all":
+            run_bronze()
+            run_silver()
+            run_gold()
+            run_profiler()
         else:
             print(f"Unknown command: {command}")
-            print("Available commands: ingest, process, load")
+            print_usage()
             sys.exit(1)
     else:
-        # Default: run all
-        run_bronze()
-        run_silver()
-        run_gold()
+        # Show usage if no command provided
+        print_usage()
+        sys.exit(1)
+
+
+def print_usage() -> None:
+    print("Usage: python main.py [ingest|process|load|profile|all]")
 
 
 if __name__ == "__main__":

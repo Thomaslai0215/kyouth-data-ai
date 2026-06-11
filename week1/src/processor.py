@@ -15,7 +15,7 @@ class JobRecord(BaseModel):
     @classmethod
     def cannot_be_empty(cls, v: str) -> str:
         value = v.strip()
-        if not value or value in {"-", "n/a", "none"}:
+        if not value or value in {"-", "n/a", "none",}:
             raise ValueError("Field cannot be empty")
         return value
 
@@ -31,21 +31,16 @@ def _extract_meta(soup: BeautifulSoup, name: str, attr: str = "property") -> str
     return None
 
 
-def _extract_fields(html: str, html_path: Path) -> dict:
+def _extract_fields(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
     # source_id from og:url
     og_url = _extract_meta(soup, "og:url") or ""
     source_id = og_url.rstrip("/").split("/")[-1] if og_url else ""
 
-    # description from meta tags
-    description_tag = (
-        _extract_meta(soup, "description", attr="name")
-        or _extract_meta(soup, "og:description")
-        or _extract_meta(soup, "twitter:description")
-        or ""
-    )
-    description = BeautifulSoup(description_tag, "html.parser").get_text(separator=" ", strip=True) if description_tag else ""
+    descriptions_tag = soup.find(attrs={"data-automation": "jobAdDetails"})
+    description = descriptions_tag.get_text(separator="\n", strip=True) if descriptions_tag else ""
+
 
     # job_title via data-automation="job-detail-title"
     title_tag = soup.find(attrs={"data-automation": "job-detail-title"})
@@ -99,7 +94,7 @@ def process_all_html(input_dir: Path, output_dir: Path) -> None:
 
     for html_path in html_files:
         html = _read_html(html_path)
-        fields = _extract_fields(html, html_path)
+        fields = _extract_fields(html)
         record, error_field = _validate_record(fields)
 
         if record is None:
