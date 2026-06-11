@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_html_from_mhtml(mhtml_path: Path) -> str:
+    """Read one MHTML file and return the HTML text inside it."""
     with open(mhtml_path, "rb") as file:
         msg = BytesParser(policy=policy.default).parse(file)
 
@@ -21,6 +22,7 @@ def _extract_html_from_mhtml(mhtml_path: Path) -> str:
 
 
 def ingest_all_mhtml(input_dir: Path, output_dir: Path) -> None:
+    """Convert every MHTML file in input_dir to HTML files in output_dir."""
     output_dir.mkdir(parents=True, exist_ok=True)
     print("🥉 Bronze: Extracting HTML from MHTML files")
 

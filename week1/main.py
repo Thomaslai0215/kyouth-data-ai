@@ -22,28 +22,33 @@ DB_PATH = GOLD_DIR / "jobs.db"
 
 
 def run_profiler() -> None:
+    """Run the data quality check on the gold database."""
     run_data_profile(DB_PATH)
 
 
 def run_gold() -> None:
+    """Load silver JSON files into the gold SQLite database."""
     input_dir = SILVER_DIR
     output_dir = GOLD_DIR
     load_all_jsons(input_dir, output_dir)
 
 
 def run_silver() -> None:
+    """Clean bronze HTML files and save them as silver JSON files."""
     input_dir = BRONZE_DIR
     output_dir = SILVER_DIR
     process_all_html(input_dir, output_dir)
 
 
 def run_bronze() -> None:
+    """Extract HTML from source MHTML files into the bronze folder."""
     input_dir = SOURCE_DIR
     output_dir = BRONZE_DIR
     ingest_all_mhtml(input_dir, output_dir)
 
 
 def main() -> None:
+    """Run one pipeline step based on the command given on the command line."""
     if len(sys.argv) > 1:
         command = sys.argv[1]
         if command == "ingest":
@@ -69,6 +74,7 @@ def main() -> None:
 
 
 def print_usage() -> None:
+    """Show the list of valid commands."""
     print("Usage: python main.py [ingest|process|load|profile|all]")
 
 

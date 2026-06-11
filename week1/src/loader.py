@@ -15,11 +15,13 @@ if sys.stdout.encoding != "utf-8":
 
 
 def _compute_content_hash(job_title: str, company: str, description: str) -> str:
+    """Build a unique hash from the main job text fields to detect content changes."""
     hash_input = f"{job_title}|{company}|{description}"
     return hashlib.sha256(hash_input.encode()).hexdigest()
 
 
 def load_all_jsons(input_dir: Path, output_dir: Path) -> None:
+    """Load every JSON file in input_dir into the jobs table in jobs.db."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     db_path = output_dir / "jobs.db"
@@ -106,4 +108,3 @@ def load_all_jsons(input_dir: Path, output_dir: Path) -> None:
     print("\n📊 Gold Summary:")
     print(f"Total: {total} | Inserted: {inserted} | Updated: {updated} | Skipped: {skipped}")
     print()
-

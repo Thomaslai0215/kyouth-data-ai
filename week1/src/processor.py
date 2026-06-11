@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class JobListing(BaseModel):
+    """One job record with the four fields we need to save."""
     source_id: str
     job_title: str
     company: str
@@ -17,6 +18,7 @@ class JobListing(BaseModel):
     @field_validator("source_id", "job_title", "company", "description")
     @classmethod
     def cannot_be_empty(cls, v: str) -> str:
+        """Reject blank or whitespace-only values."""
         value = v.strip()
         if not value:
             raise ValueError("Field cannot be empty")
@@ -24,10 +26,12 @@ class JobListing(BaseModel):
 
 
 def _read_html(html_path: Path) -> str:
+    """Read an HTML file as a text string."""
     return html_path.read_text(encoding="utf-8")
 
 
 def _extract_meta(soup: BeautifulSoup, name: str, attr: str = "property") -> str | None:
+    """Get the content value from a meta tag, or None if it is missing."""
     tag = soup.find("meta", attrs={attr: name})
     if tag and tag.get("content"):
         return tag["content"].strip()
@@ -35,6 +39,7 @@ def _extract_meta(soup: BeautifulSoup, name: str, attr: str = "property") -> str
 
 
 def _extract_fields(html: str) -> dict:
+    """Pull job fields out of the HTML page."""
     soup = BeautifulSoup(html, "html.parser")
 
     og_url = _extract_meta(soup, "og:url") or ""
@@ -60,6 +65,7 @@ def _extract_fields(html: str) -> dict:
 
 
 def _validate_record(fields: dict) -> tuple[JobListing | None, str | None]:
+    """Check that all fields are valid. Returns the record, or the first bad field name."""
     try:
         record = JobListing(**fields)
         return record, None
@@ -72,6 +78,7 @@ def _validate_record(fields: dict) -> tuple[JobListing | None, str | None]:
 
 
 def _save_json(output_path: Path, record: JobListing) -> None:
+    """Write one job record to a JSON file."""
     output_path.write_text(
         json.dumps(record.model_dump(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -79,6 +86,7 @@ def _save_json(output_path: Path, record: JobListing) -> None:
 
 
 def process_all_html(input_dir: Path, output_dir: Path) -> None:
+    """Turn every HTML file in input_dir into a cleaned JSON file in output_dir."""
     output_dir.mkdir(parents=True, exist_ok=True)
     print("🥈 Silver: Cleaning and validating HTML to JSON")
 

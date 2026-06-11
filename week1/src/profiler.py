@@ -16,6 +16,7 @@ SPECIAL_CHAR_PATTERN = re.compile(r"[!#@$%^&*]{4,}")
 
 
 def _has_too_many_special_chars(description: str) -> bool:
+    """Return True if the description has long runs of special characters."""
     return bool(SPECIAL_CHAR_PATTERN.search(description))
 
 
@@ -24,6 +25,7 @@ def _determine_quality(
     company: str | None,
     description: str | None,
 ) -> str:
+    """Label a job as HIGH or LOW based on simple data quality rules."""
     if not job_title or not company or not description:
         return "LOW"
     if len(description) < 100:
@@ -34,6 +36,7 @@ def _determine_quality(
 
 
 def _ensure_quality_schema(cursor: sqlite3.Cursor) -> None:
+    """Add the quality column and quarantine table if they do not exist yet."""
     cursor.execute(load_sql("table_info_jobs.sql"))
     columns = {row[1] for row in cursor.fetchall()}
     if "quality" not in columns:
@@ -42,6 +45,7 @@ def _ensure_quality_schema(cursor: sqlite3.Cursor) -> None:
 
 
 def _label_and_quarantine(cursor: sqlite3.Cursor) -> tuple[int, int]:
+    """Mark each job as HIGH or LOW, then move LOW jobs to jobs_quarantine."""
     select_query = load_sql("select_all_jobs.sql")
     update_query = load_sql("update_quality.sql")
 
@@ -67,6 +71,7 @@ def _label_and_quarantine(cursor: sqlite3.Cursor) -> tuple[int, int]:
 
 
 def run_data_profile(db_path: Path) -> None:
+    """Check job data quality in the database and print a summary report."""
     if not db_path.exists():
         logger.error(f"Database not found at {db_path}")
         return
