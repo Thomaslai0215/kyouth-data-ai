@@ -20,17 +20,24 @@ def _compute_content_hash(job_title: str, company: str, description: str) -> str
     return hashlib.sha256(hash_input.encode()).hexdigest()
 
 
+def _ensure_jobs_table(cursor: sqlite3.Cursor) -> None:
+    """Create the jobs table if needed and add any missing columns."""
+    cursor.execute(load_sql("create_jobs.sql"))
+    cursor.execute(load_sql("table_info_jobs.sql"))
+    columns = {row[1] for row in cursor.fetchall()}
+    if "content_hash" not in columns:
+        cursor.execute(load_sql("add_content_hash_column.sql"))
+
+
 def load_all_jsons(input_dir: Path, output_dir: Path) -> None:
-    """Load every JSON file in input_dir into the jobs table in jobs.db."""
+    """Load JSON files into jobs.db, inserting new jobs and updating changed ones."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     db_path = output_dir / "jobs.db"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    cursor.execute(load_sql("drop_jobs_quarantine.sql"))
-    cursor.execute(load_sql("drop_jobs.sql"))
-    cursor.execute(load_sql("create_jobs.sql"))
+    _ensure_jobs_table(cursor)
     conn.commit()
 
     print("🥇 Gold: Loading Silver JSON data into SQLite")

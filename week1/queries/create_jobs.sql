@@ -1,4 +1,4 @@
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
     source_id TEXT PRIMARY KEY,
     job_title TEXT,
     company TEXT,
