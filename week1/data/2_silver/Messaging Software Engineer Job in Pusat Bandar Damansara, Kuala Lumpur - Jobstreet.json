@@ -1,6 +1,0 @@
-{
-  "source_id": "91501459",
-  "job_title": "Messaging Software Engineer",
-  "company": "Anchor Consulting Sdn. Bhd.",
-  "description": "Job Summary We are looking for a Messaging Software Engineer to build and manage messaging solutions using WhatsApp. The role focuses on developing integrations, automations, and customer messaging systems using the WhatsApp Business API. Key Responsibilities Develop and maintain integrations with WhatsApp Business API. Build messaging automation for notifications, alerts, and customer communication. Design and implement message workflows, templates, and chatbot logic. Integrate WhatsApp messaging with internal systems (CRM, backend services, databases). Monitor messaging delivery, performance, and reliability. Troubleshoot issues related to message sending, receiving, and webhooks. Ensure compliance with messaging policies and best practices. Required Skills Experience with APIs and webhooks. Programming skills in languages such as Python, Node.js, or Java. Experience working with WhatsApp integrations. Understanding of REST APIs, JSON, and HTTP protocols. Basic knowledge of databases and backend systems. Nice to Have Experience with chatbot platforms. Experience with Meta Platforms messaging products. Knowledge of CRM integrations and messaging automation tools."
-}

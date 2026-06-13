@@ -1,6 +1,0 @@
-{
-  "source_id": "91765300",
-  "job_title": "Data Scientist",
-  "company": "LAVU TECH SOLUTIONS SDN. BHD.",
-  "description": "Key Responsibilities Develop and deploy data-driven applications using Python and frameworks like Streamlit, Flask, or Django Design and implement data pipelines and analytical solutions Work with databases using SQL (PostgreSQL preferred) for data extraction and transformation Build and integrate Generative AI solutions including NLP, LLMs, and RAG-based applications Develop Agentic AI workflows using tools like LangGraph, CrewAI Implement OCR solutions for data extraction from documents Collaborate with cross-functional teams to deliver end-to-end web-based data products Support frontend integration for interactive dashboards and applications Required Skills Strong programming experience in Python Hands-on experience with Streamlit / Flask / Django Solid knowledge of SQL and PostgreSQL Experience in Data Engineering / Data Science workflows Exposure to Generative AI (NLP, LLM, RAG) Familiarity with Agentic AI frameworks (LangGraph, CrewAI) Basic frontend development understanding Experience with OCR and web application development Nice to Have Experience in deploying scalable AI applications Knowledge of cloud platforms (AWS/GCP/Azure) Understanding of modern AI pipelines and architectures"
-}
