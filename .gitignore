@@ -1,31 +1,4 @@
-# Virtual environment
-.venv/
-venv/
-
-# Python cache and compiled files
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-
-# Project build artifacts
-build/
-dist/
-*.egg-info/
-
-# Tool caches
+data/
+src/__pycache__/
 .ruff_cache/
-
-# IDE and editor settings
-.vscode/
-.idea/
-*.iml
-
-# Environment files
-.env
-*.env
-
-# Database and logs
-*.db
-*.sqlite
-*.log
+.venv/
