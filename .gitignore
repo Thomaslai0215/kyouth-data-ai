@@ -1,4 +1,8 @@
 data/
+__pycache__/
+*.py[cod]
 src/__pycache__/
 .ruff_cache/
 .venv/
+.env
+

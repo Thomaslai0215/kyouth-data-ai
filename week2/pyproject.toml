@@ -1,0 +1,10 @@
+[project]
+name = "kyouth-data-ai-week2"
+version = "0.1.0"
+description = "Week 2 LLM setup and prompt utilities"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=1.0.0",
+    "python-dotenv>=1.0.0",
+]
