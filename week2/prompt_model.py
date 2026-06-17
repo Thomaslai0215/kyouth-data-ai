@@ -9,18 +9,33 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+# Required models from the project setup document.
 GEMINI_MODELS = {
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-3-flash-preview",
 }
 
+OLLAMA_MODELS = {
+    "llama3.1",
+    "phi3",
+    "deepseek-r1:1.5b",
+}
+
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 
+def _print_available_models() -> None:
+    print("\n--- AVAILABLE MODELS ---")
+    print("Gemini:", ", ".join(sorted(GEMINI_MODELS)))
+    print("Ollama:", ", ".join(sorted(OLLAMA_MODELS)))
+
+
 def prompt_model(model: str, prompt: str) -> str:
+    """Route to Gemini (cloud) or Ollama (local) based on model name."""
     if model in GEMINI_MODELS or model.startswith("gemini-"):
         return _prompt_gemini(model, prompt)
+    # Bonus: any other name is treated as an Ollama model (e.g. mistral, qwen2.5).
     return _prompt_ollama(model, prompt)
 
 
@@ -80,7 +95,10 @@ def main() -> None:
     prompt = sys.argv[2]
 
     print("--- RESPONSE ---")
-    print(prompt_model(model, prompt))
+    response = prompt_model(model, prompt)
+    print(response)
+    if response.startswith("[Gemini Error]") or response.startswith("[Ollama Error]"):
+        _print_available_models()
 
 
 if __name__ == "__main__":
