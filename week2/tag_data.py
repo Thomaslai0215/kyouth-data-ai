@@ -61,6 +61,9 @@ Jobs:
 OPTIMIZED_PROMPT_TEMPLATE = """Extract tech stack per job. JSON array only:
 [{{"id":"<id>","tech_stack":"skill1, skill2"}}]
 
+Include all languages, frameworks, databases, cloud, and tools from title and description.
+Always return real skills — never placeholders (e.g. N/A, not specified, unknown).
+
 {jobs_block}
 """
 
@@ -68,6 +71,34 @@ MAX_BATCH_ATTEMPTS = 5
 DESCRIPTION_CHAR_LIMIT = 1200
 MAX_BATCH_SIZE = 4
 MIN_MEANINGFUL_CHARS = 40
+MIN_LLM_SKILLS = 2
+
+# Whole-stack or per-skill values that mean the model found nothing useful.
+VAGUE_SKILL_TERMS: tuple[str, ...] = (
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "nil",
+    "unknown",
+    "unspecified",
+    "not specified",
+    "not available",
+    "not applicable",
+    "not mentioned",
+    "no information",
+    "no stack",
+    "no tech",
+    "no skills",
+    "no technology",
+    "no technologies",
+    "tbd",
+    "tba",
+    "missing",
+    "empty",
+    "unclear",
+    "various",
+)
 
 # Known technologies/tools — matched anywhere in title or company (longer names first).
 TECH_TERMS: tuple[tuple[str, str], ...] = (
@@ -292,6 +323,81 @@ def infer_tech_stack_from_metadata(job: dict[str, str]) -> str:
     if not skills:
         return "software development"
     return ", ".join(skills[:8])
+
+
+def _normalize_skill_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").lower().strip(" .,;:-"))
+
+
+def _compact_skill_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9/+]", "", _normalize_skill_text(text))
+
+
+def is_vague_skill(skill: str) -> bool:
+    """True when a single skill token is a placeholder, not a real technology."""
+    normalized = _normalize_skill_text(skill)
+    if not normalized:
+        return True
+    compact = _compact_skill_text(skill)
+    if compact in {"na", "n/a", "tbd", "tba", "nil", "null", "none"}:
+        return True
+    if normalized in VAGUE_SKILL_TERMS:
+        return True
+    if compact in {term.replace(" ", "").replace("/", "") for term in VAGUE_SKILL_TERMS}:
+        return True
+    for term in VAGUE_SKILL_TERMS:
+        if normalized == term or normalized.startswith(f"{term} "):
+            return True
+    return False
+
+
+def parse_meaningful_skills(tech_stack: str) -> list[str]:
+    return [
+        skill.strip()
+        for skill in tech_stack.split(",")
+        if skill.strip() and not is_vague_skill(skill.strip())
+    ]
+
+
+def is_vague_tech_stack(tech_stack: str) -> bool:
+    """True when the full LLM tech_stack is empty or only placeholder text."""
+    if not (tech_stack or "").strip():
+        return True
+    skills = parse_meaningful_skills(tech_stack)
+    return len(skills) == 0
+
+
+def merge_tech_stacks(*stacks: str, limit: int = 8) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for stack in stacks:
+        for skill in parse_meaningful_skills(stack):
+            key = skill.lower()
+            if key not in seen:
+                seen.add(key)
+                merged.append(skill)
+    return ", ".join(merged[:limit])
+
+
+def resolve_tech_stack(job: dict[str, str], llm_stack: str) -> tuple[str, str | None]:
+    """
+    Use metadata when the LLM returns placeholders or too few skills.
+    Returns (final_stack, note_for_log or None).
+    """
+    llm_stack = (llm_stack or "").strip()
+    metadata_stack = infer_tech_stack_from_metadata(job)
+
+    if is_vague_tech_stack(llm_stack):
+        return metadata_stack, "inferred from metadata (vague LLM response)"
+
+    if len(parse_meaningful_skills(llm_stack)) < MIN_LLM_SKILLS:
+        enriched = merge_tech_stacks(llm_stack, metadata_stack)
+        if enriched and enriched != llm_stack:
+            return enriched, "enriched from metadata (sparse LLM response)"
+        if enriched:
+            return enriched, None
+
+    return llm_stack, None
 
 
 def split_jobs_for_tagging(
@@ -664,7 +770,7 @@ async def _process_batch_once(
 
             id_to_stack = map_parsed_items(parsed, jobs)
 
-            resolved: list[tuple[str, str]] = []
+            resolved: list[tuple[str, str, str | None]] = []
             for job in jobs:
                 source_id = str(job["source_id"])
                 tech_stack = id_to_stack.get(source_id)
@@ -675,11 +781,13 @@ async def _process_batch_once(
                             break
                 if not tech_stack:
                     raise ValueError(f"Missing tagged result for job {source_id}")
-                resolved.append((source_id, tech_stack))
+                final_stack, note = resolve_tech_stack(job, tech_stack)
+                resolved.append((source_id, final_stack, note))
 
-            for source_id, tech_stack in resolved:
+            for source_id, tech_stack, note in resolved:
                 await update_job_stack(mcp_client, source_id, tech_stack)
-                print(f"Analyzed Job {source_id}: {tech_stack}")
+                suffix = f" ({note})" if note else ""
+                print(f"Analyzed Job {source_id}: {tech_stack}{suffix}")
                 tagged_stacks.append(tech_stack)
 
             return tagged_stacks
@@ -816,32 +924,83 @@ async def _clear_tech_stack(db_url: str) -> None:
         await mcp_run_script(mcp_client, "clear_tech_stack.sql")
 
 
-async def run_benchmark(db_url: str, model: str = DEFAULT_MODEL) -> None:
-    """Compare baseline vs optimized prompts (bonus proof). Resets tech_stack between runs."""
-    print("=== BENCHMARK: prompt optimization (baseline vs optimized) ===")
-    await _clear_tech_stack(db_url)
-
-    baseline = await _tag_data_async(db_url, model=model, optimized=False)
+def _print_tagging_summary(label: str, result: TaggingResult) -> None:
+    """Print the same style of summary as a normal tag_data() run."""
+    print(f"--- {label} SUMMARY ---")
+    print(f"Total tokens used: {result.tokens.total}, took {result.time_ms:.3f}ms")
     print(
-        f"Baseline -> tokens: {baseline.tokens.total}, time: {baseline.time_ms:.3f}ms"
+        f"Input tokens: {result.tokens.input_tokens}, "
+        f"Output tokens: {result.tokens.output_tokens}"
     )
+    print(f"Jobs tagged: {result.jobs_tagged}")
+    if result.quality:
+        print("--- TAGGING QUALITY ---")
+        for key, value in result.quality.items():
+            print(f"{key}: {value}")
 
-    await _clear_tech_stack(db_url)
 
-    optimized = await _tag_data_async(db_url, model=model, optimized=True)
-    print(
-        f"Optimized -> tokens: {optimized.tokens.total}, time: {optimized.time_ms:.3f}ms"
-    )
+def _print_benchmark_comparison(baseline: TaggingResult, optimized: TaggingResult) -> None:
+    """Side-by-side comparison after both benchmark runs."""
+    print("=== COMPARISON SUMMARY ===")
+    print(f"Baseline tokens: {baseline.tokens.total}")
+    print(f"Optimized tokens: {optimized.tokens.total}")
+    print(f"Baseline time: {baseline.time_ms:.3f}ms")
+    print(f"Optimized time: {optimized.time_ms:.3f}ms")
+    print(f"Baseline jobs tagged: {baseline.jobs_tagged}")
+    print(f"Optimized jobs tagged: {optimized.jobs_tagged}")
 
+    if baseline.quality and optimized.quality:
+        b_avg = baseline.quality.get("avg_skills_per_job", 0)
+        o_avg = optimized.quality.get("avg_skills_per_job", 0)
+        print(f"Baseline avg skills/job: {b_avg}")
+        print(f"Optimized avg skills/job: {o_avg}")
+
+    print("")
     if baseline.tokens.total > 0:
         token_saving = (
             (baseline.tokens.total - optimized.tokens.total) / baseline.tokens.total
         ) * 100
-        print(f"Token change: {token_saving:.1f}% (target >5% reduction)")
+        token_delta = baseline.tokens.total - optimized.tokens.total
+        print(
+            f"Token change: {token_saving:.1f}% "
+            f"({token_delta:+d} tokens, target >5% reduction)"
+        )
 
     if baseline.time_ms > 0:
         time_saving = ((baseline.time_ms - optimized.time_ms) / baseline.time_ms) * 100
-        print(f"Time change: {time_saving:.1f}% (target >5% reduction)")
+        time_delta = baseline.time_ms - optimized.time_ms
+        print(
+            f"Time change: {time_saving:.1f}% "
+            f"({time_delta:+.3f}ms, target >5% reduction)"
+        )
+
+
+async def run_benchmark(db_url: str, model: str = DEFAULT_MODEL) -> None:
+    """Compare baseline vs optimized prompts (bonus proof). Resets tech_stack between runs."""
+    print("=== BENCHMARK: prompt optimization (baseline vs optimized) ===")
+    print("Benchmark mode forces both runs explicitly:")
+    print("- Baseline: optimized=False (long prompt)")
+    print("- Optimized: optimized=True (short prompt)")
+    print("TAG_OPTIMIZED env is ignored in this benchmark.")
+    print("")
+
+    await _clear_tech_stack(db_url)
+
+    print("=== BASELINE RUN (optimized=False) ===")
+    baseline = await _tag_data_async(db_url, model=model, optimized=False)
+    print("")
+    _print_tagging_summary("BASELINE", baseline)
+
+    await _clear_tech_stack(db_url)
+
+    print("")
+    print("=== OPTIMIZED RUN (optimized=True) ===")
+    optimized = await _tag_data_async(db_url, model=model, optimized=True)
+    print("")
+    _print_tagging_summary("OPTIMIZED", optimized)
+
+    print("")
+    _print_benchmark_comparison(baseline, optimized)
 
 
 def main() -> None:
