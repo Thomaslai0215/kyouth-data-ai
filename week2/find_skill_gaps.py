@@ -400,10 +400,9 @@ async def _find_skill_gaps_async(
 
     resume_text = sanitize_resume_text(raw_resume)
 
-    # Justifiable batch/retry: one resume = one request, so batch size is 1.
-    # Retry delay reuses the rate-limit formula from Day 0/1-2 (60 / RPM).
+    # One resume = one LLM request (total_jobs=1). Retry delay reuses 60/RPM.
     limits = load_rate_limits(model)
-    settings = calculate_batch_settings(limits)
+    settings = calculate_batch_settings(limits, total_jobs=1)
     retry_delay = settings.retry_delay_seconds
 
     api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")

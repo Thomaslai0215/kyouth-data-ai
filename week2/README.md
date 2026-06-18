@@ -216,7 +216,7 @@ Skill gaps (missing): 41
 
 | Function | Purpose |
 |---|---|
-| `calculate_batch_settings()` | Derive batch size and retry delay from RPM/TPM |
+| `calculate_batch_settings()` | Derive batch size from TPM, RPD, job count, and quality cap; retry delay from RPM |
 | `infer_tech_stack_from_metadata()` | Tag unusual jobs (empty/boilerplate descriptions) without LLM |
 | `resolve_tech_stack()` | Enrich vague LLM answers (N/A, single skill) |
 | `process_batch()` | One Gemini call + MCP update for a job batch |
@@ -286,7 +286,38 @@ Scripts expect a SQLite `jobs` table with at least:
 - **Skill splitting:** `/` splits compound skills except `A/B testing` and `CI/CD`; output is lowercased.
 - **Direct match:** `C/C++` on a resume removes `c`, `c++`, and `c/c++` from gaps (split + set logic).
 - **Non-technical skills:** certifications, spoken languages, and soft skills are excluded by prompt rules.
-- **Rate limits:** `rate_limits.txt` reflects the active Gemini model; batch size stays within TPM/RPM budgets.
+- **Rate limits:** `rate_limits.txt` reflects the active Gemini model; batch size is computed from TPM, RPD, and workload (see below).
+
+### Batch size justification
+
+Batch size is **not** tied to a magic dataset size (e.g. “8 jobs”). It uses one formula for any workload:
+
+```text
+tpm_batch   = floor((TPM × 0.35 − 120) / tokens_per_job)
+rpd_floor   = ceil(total_jobs / RPD)
+batch_size  = max(1, rpd_floor, min(tpm_batch, total_jobs, quality_cap))
+retry_delay = 60 / RPM
+```
+
+| Term | Role |
+|---|---|
+| `tpm_batch` | How many jobs fit in ~35% of the per-minute token budget |
+| `rpd_floor` | Minimum batch so `ceil(jobs / batch) ≤ RPD` (finish within daily requests) |
+| `total_jobs` | Never batch more jobs than exist (8 jobs → at most 8 per call) |
+| `quality_cap` | `BATCH_QUALITY_CAP = 8` — limits JSON parse failures and retry blast radius |
+| `tokens_per_job` | Estimated from actual job title/company/description when available |
+| `retry_delay` | Spaces API calls to respect requests-per-minute (RPM) |
+
+**Examples (TPM=250k, RPD=500, quality_cap=8):**
+
+| Jobs | Typical batch | API calls | Notes |
+|---|---|---|---|
+| 8 | 8 | 1 | `total_jobs` is the limiting factor → single call |
+| 100 | 8 | 13 | Quality cap limits batch; far fewer calls than old cap of 4 (25 calls) |
+
+If `rpd_floor` exceeds the quality cap (tight daily limit + many jobs), batch size rises to meet RPD and a warning is printed. If estimated API calls still exceed RPD, the script warns to split runs or pick a higher-RPD model.
+
+**Skill gaps:** `find_skill_gaps.py` passes `total_jobs=1` (one resume per run); only `retry_delay = 60/RPM` applies.
 
 ### Data flow
 
@@ -337,7 +368,7 @@ uv run find_skill_gaps.py --benchmark
 |---|---|
 | `tag_data(db_url: str)` | `tag_data.py` |
 | Read `jobs`, fill empty `tech_stack` | MCP + `select_untagged_jobs.sql` |
-| Batch updates (not whole table in one prompt) | `calculate_batch_settings()` from `rate_limits.txt` |
+| Batch updates (not whole table in one prompt) | `calculate_batch_settings()` — TPM + RPD + quality cap |
 | Log each job: `Analyzed Job {id}: ...` | `process_batch()` |
 | Retry on batch mismatch | `[Batch N] Attempt X failed: ...` |
 | Graceful errors (no stack traces) | try/except throughout |

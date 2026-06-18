@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -69,7 +70,10 @@ Always return real skills — never placeholders (e.g. N/A, not specified, unkno
 
 MAX_BATCH_ATTEMPTS = 5
 DESCRIPTION_CHAR_LIMIT = 1200
-MAX_BATCH_SIZE = 4
+BATCH_QUALITY_CAP = 8
+TPM_BUDGET_FRACTION = 0.35
+PROMPT_OVERHEAD_TOKENS = 120
+DEFAULT_TOKENS_PER_JOB = 600
 MIN_MEANINGFUL_CHARS = 40
 MIN_LLM_SKILLS = 2
 
@@ -177,6 +181,8 @@ class BatchSettings:
     batch_size: int
     retry_delay_seconds: float
     formula_note: str
+    api_calls: int = 0
+    rpd_warning: str | None = None
 
 
 @dataclass
@@ -231,30 +237,79 @@ def _parse_limit_value(raw: str) -> int:
     return int(float(raw))
 
 
+def estimate_avg_tokens_per_job(
+    jobs: list[dict[str, str]] | None = None,
+    fallback: int = DEFAULT_TOKENS_PER_JOB,
+) -> int:
+    """Estimate average prompt tokens per job from description/metadata size."""
+    if not jobs:
+        return fallback
+
+    per_job_tokens: list[int] = []
+    for job in jobs:
+        text = " ".join(
+            str(job.get(key, "") or "")
+            for key in ("title", "company", "description")
+        )
+        per_job_tokens.append(estimate_tokens(text) + 80)
+
+    return max(100, sum(per_job_tokens) // len(per_job_tokens))
+
+
 def calculate_batch_settings(
-    limits: RateLimitConfig, avg_tokens_per_job: int = 600
+    limits: RateLimitConfig,
+    *,
+    total_jobs: int = 1,
+    avg_tokens_per_job: int | None = None,
 ) -> BatchSettings:
     """
-    Derive batch size and retry delay from rate limits.
+    Derive batch size and retry delay from rate limits and workload.
 
-    - retry_delay = 60 / RPM (seconds between API calls)
-    - batch_size from TPM budget: use ~35% of TPM per request, capped by RPM headroom
+    batch_size = max(1, rpd_floor, min(tpm_batch, total_jobs, quality_cap))
+      - tpm_batch: jobs that fit in ~35% of TPM per request
+      - rpd_floor: ceil(total_jobs / RPD) so daily request budget can be met
+      - quality_cap: BATCH_QUALITY_CAP for JSON reliability and retries
+      - total_jobs: never batch more jobs than exist
+
+    retry_delay = 60 / RPM (seconds between API calls)
     """
     retry_delay = 60.0 / max(limits.rpm, 1)
-    prompt_overhead = 120
-    tokens_per_job = max(avg_tokens_per_job, 100)
-    tpm_budget_per_request = int(limits.tpm * 0.35)
-    batch_size = max(
-        1, min(MAX_BATCH_SIZE, (tpm_budget_per_request - prompt_overhead) // tokens_per_job)
-    )
+    tokens_per_job = max(avg_tokens_per_job or DEFAULT_TOKENS_PER_JOB, 100)
+    total = max(total_jobs, 1)
+
+    tpm_budget = int(limits.tpm * TPM_BUDGET_FRACTION)
+    tpm_batch = max(1, (tpm_budget - PROMPT_OVERHEAD_TOKENS) // tokens_per_job)
+    rpd_floor = math.ceil(total / max(limits.rpd, 1))
+
+    preferred = min(tpm_batch, total, BATCH_QUALITY_CAP)
+    batch_size = max(1, rpd_floor, preferred)
+    batch_size = min(batch_size, tpm_batch, total)
+
+    api_calls = math.ceil(total / batch_size)
+    rpd_warning: str | None = None
+    if limits.rpd > 0 and api_calls > limits.rpd:
+        rpd_warning = (
+            f"Estimated API calls ({api_calls}) exceed RPD ({limits.rpd}). "
+            "Increase batch size, use a higher-RPD model, or split tagging across runs."
+        )
+    elif rpd_floor > BATCH_QUALITY_CAP:
+        rpd_warning = (
+            f"RPD floor ({rpd_floor}) exceeds quality cap ({BATCH_QUALITY_CAP}); "
+            f"using batch_size={batch_size} to stay within daily request limits."
+        )
+
     formula = (
         f"retry_delay=60/RPM={retry_delay:.1f}s; "
-        f"batch_size=min({MAX_BATCH_SIZE}, floor(TPM*0.35-{prompt_overhead})/{tokens_per_job})={batch_size}"
+        f"tpm_batch={tpm_batch}; rpd_floor={rpd_floor}; "
+        f"batch_size=max(1, rpd_floor, min(tpm_batch, jobs={total}, cap={BATCH_QUALITY_CAP}))="
+        f"{batch_size}; api_calls=ceil({total}/{batch_size})={api_calls}"
     )
     return BatchSettings(
         batch_size=batch_size,
         retry_delay_seconds=retry_delay,
         formula_note=formula,
+        api_calls=api_calls,
+        rpd_warning=rpd_warning,
     )
 
 
@@ -814,7 +869,6 @@ async def _tag_data_async(
         return TaggingResult()
 
     limits = load_rate_limits(model)
-    settings = calculate_batch_settings(limits)
     gemini_client = genai.Client(api_key=api_key)
     usage = TokenUsage()
     tagged_stacks: list[str] = []
@@ -849,12 +903,20 @@ async def _tag_data_async(
                     quality=measure_tagging_quality(tagged_stacks),
                 )
 
+            settings = calculate_batch_settings(
+                limits,
+                total_jobs=len(llm_jobs),
+                avg_tokens_per_job=estimate_avg_tokens_per_job(llm_jobs),
+            )
+
             print(
                 f"Model: {model} | Batch size: {settings.batch_size} | "
                 f"Retry delay: {settings.retry_delay_seconds:.1f}s | "
-                f"LLM jobs: {len(llm_jobs)}"
+                f"LLM jobs: {len(llm_jobs)} | API calls: {settings.api_calls}"
             )
             print(f"Rate limit formula: {settings.formula_note}")
+            if settings.rpd_warning:
+                print(f"[Rate Limit Warning] {settings.rpd_warning}")
 
             batch_index = 0
             for offset in range(0, len(llm_jobs), settings.batch_size):
