@@ -1,4 +1,12 @@
-"""Day 1-2: Tag jobs.tech_stack using Gemini via batched prompts and MCP for SQL."""
+"""Day 1-2: Tag jobs.tech_stack using Gemini via batched prompts and MCP for SQL.
+
+Pipeline overview:
+  1. MCP loads jobs with empty tech_stack
+  2. Jobs with bad descriptions → tagged from title/company (no LLM)
+  3. Other jobs → batched Gemini prompts (size from rate limits)
+  4. Each job's tech_stack saved to SQLite via MCP
+  5. Return token/time stats and quality metrics
+"""
 
 from __future__ import annotations
 
@@ -34,6 +42,7 @@ FALLBACK_MODELS = (
 
 
 def _mcp_client(db_url: str) -> Client:
+    """Start the MCP SQLite server subprocess pointed at the given database file."""
     env = os.environ.copy()
     env["DB_PATH"] = str(Path(db_url).resolve())
     return Client(
@@ -171,6 +180,8 @@ BOILERPLATE_PHRASES: tuple[str, ...] = (
 
 @dataclass
 class RateLimitConfig:
+    """RPM, TPM, and RPD limits for one Gemini model (from rate_limits.txt)."""
+
     rpm: int
     tpm: int
     rpd: int
@@ -178,6 +189,8 @@ class RateLimitConfig:
 
 @dataclass
 class BatchSettings:
+    """Computed batch size, wait time between calls, and optional RPD warning."""
+
     batch_size: int
     retry_delay_seconds: float
     formula_note: str
@@ -187,20 +200,26 @@ class BatchSettings:
 
 @dataclass
 class TokenUsage:
+    """Running total of input/output tokens across Gemini calls."""
+
     input_tokens: int = 0
     output_tokens: int = 0
 
     @property
     def total(self) -> int:
+        """Input plus output tokens."""
         return self.input_tokens + self.output_tokens
 
     def add(self, other: TokenUsage) -> None:
+        """Add another TokenUsage into this running total."""
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
 
 
 @dataclass
 class TaggingResult:
+    """Internal result from one tagging run: tokens, time, count, and quality metrics."""
+
     tokens: TokenUsage = field(default_factory=TokenUsage)
     time_ms: float = 0.0
     jobs_tagged: int = 0
@@ -210,7 +229,7 @@ class TaggingResult:
 def load_rate_limits(
     model: str = DEFAULT_MODEL, path: Path = RATE_LIMITS_PATH
 ) -> RateLimitConfig:
-    """Load RPM/TPM/RPD for a Gemini model from rate_limits.txt."""
+    """Read RPM/TPM/RPD for a model from rate_limits.txt (or use safe defaults)."""
     defaults = RateLimitConfig(rpm=10, tpm=250_000, rpd=250)
     if not path.exists():
         return defaults
@@ -227,6 +246,7 @@ def load_rate_limits(
 
 
 def _parse_limit_value(raw: str) -> int:
+    """Parse a limit like 250000, 250K, or 1M into an integer."""
     raw = raw.upper().strip()
     if raw.endswith("K"):
         return int(float(raw[:-1]) * 1_000)
@@ -263,15 +283,10 @@ def calculate_batch_settings(
     avg_tokens_per_job: int | None = None,
 ) -> BatchSettings:
     """
-    Derive batch size and retry delay from rate limits and workload.
+    Work out how many jobs per Gemini call and how long to wait between calls.
 
-    batch_size = max(1, rpd_floor, min(tpm_batch, total_jobs, quality_cap))
-      - tpm_batch: jobs that fit in ~35% of TPM per request
-      - rpd_floor: ceil(total_jobs / RPD) so daily request budget can be met
-      - quality_cap: BATCH_QUALITY_CAP for JSON reliability and retries
-      - total_jobs: never batch more jobs than exist
-
-    retry_delay = 60 / RPM (seconds between API calls)
+    Uses TPM (token budget), RPD (daily request limit), job count, and a quality cap.
+    retry_delay = 60 / RPM seconds between batches.
     """
     retry_delay = 60.0 / max(limits.rpm, 1)
     tokens_per_job = max(avg_tokens_per_job or DEFAULT_TOKENS_PER_JOB, 100)
@@ -314,10 +329,12 @@ def calculate_batch_settings(
 
 
 def estimate_tokens(text: str) -> int:
+    """Rough token count: about 4 tokens per word."""
     return max(1, len(text.split()) * 4)
 
 
 def truncate_description(description: str, limit: int = DESCRIPTION_CHAR_LIMIT) -> str:
+    """Cut long job descriptions so prompts stay within token budget."""
     description = (description or "").strip()
     if len(description) <= limit:
         return description
@@ -325,6 +342,7 @@ def truncate_description(description: str, limit: int = DESCRIPTION_CHAR_LIMIT) 
 
 
 def _strip_boilerplate(text: str) -> str:
+    """Remove generic HR phrases like 'job description' to measure real content length."""
     cleaned = re.sub(r"\s+", " ", text.lower()).strip()
     for phrase in BOILERPLATE_PHRASES:
         cleaned = cleaned.replace(phrase, " ")
@@ -342,7 +360,7 @@ def is_insufficient_description(description: str) -> bool:
 
 
 def _metadata_text(job: dict[str, str]) -> str:
-    """Combine title, company, optional description, and title fragments split on separators."""
+    """Join title, company, and description into one string for keyword matching."""
     title = (job.get("job_title") or "").strip()
     company = (job.get("company") or "").strip()
     description = _strip_boilerplate((job.get("description") or "").strip())
@@ -354,6 +372,7 @@ def _metadata_text(job: dict[str, str]) -> str:
 
 
 def _extract_terms(text: str, term_map: tuple[tuple[str, str], ...]) -> list[str]:
+    """Find known tech or role keywords in text and return their display labels."""
     lowered = text.lower()
     found: list[str] = []
     seen: set[str] = set()
@@ -381,10 +400,12 @@ def infer_tech_stack_from_metadata(job: dict[str, str]) -> str:
 
 
 def _normalize_skill_text(text: str) -> str:
+    """Lowercase and trim punctuation from one skill token."""
     return re.sub(r"\s+", " ", (text or "").lower().strip(" .,;:-"))
 
 
 def _compact_skill_text(text: str) -> str:
+    """Strip skill text down to letters/numbers only for fuzzy placeholder checks."""
     return re.sub(r"[^a-z0-9/+]", "", _normalize_skill_text(text))
 
 
@@ -407,6 +428,7 @@ def is_vague_skill(skill: str) -> bool:
 
 
 def parse_meaningful_skills(tech_stack: str) -> list[str]:
+    """Split a comma-separated stack and drop vague placeholders like N/A."""
     return [
         skill.strip()
         for skill in tech_stack.split(",")
@@ -423,6 +445,7 @@ def is_vague_tech_stack(tech_stack: str) -> bool:
 
 
 def merge_tech_stacks(*stacks: str, limit: int = 8) -> str:
+    """Combine multiple skill lists into one deduplicated comma-separated string."""
     merged: list[str] = []
     seen: set[str] = set()
     for stack in stacks:
@@ -436,8 +459,10 @@ def merge_tech_stacks(*stacks: str, limit: int = 8) -> str:
 
 def resolve_tech_stack(job: dict[str, str], llm_stack: str) -> tuple[str, str | None]:
     """
-    Use metadata when the LLM returns placeholders or too few skills.
-    Returns (final_stack, note_for_log or None).
+    Pick the final tech_stack for a job.
+
+    If the LLM answer is vague or too short, fill in from title/company metadata.
+    Returns (final_stack, optional note for the log).
     """
     llm_stack = (llm_stack or "").strip()
     metadata_stack = infer_tech_stack_from_metadata(job)
@@ -470,6 +495,7 @@ def split_jobs_for_tagging(
 
 
 def build_jobs_block(jobs: list[dict[str, str]]) -> str:
+    """Format a batch of jobs as text (id, title, company, description) for the prompt."""
     lines: list[str] = []
     for job in jobs:
         job_id = job["source_id"]
@@ -483,6 +509,7 @@ def build_jobs_block(jobs: list[dict[str, str]]) -> str:
 
 
 def build_prompt(jobs: list[dict[str, str]], optimized: bool) -> str:
+    """Build the full Gemini prompt (baseline or optimized template + job block)."""
     jobs_block = build_jobs_block(jobs)
     template = OPTIMIZED_PROMPT_TEMPLATE if optimized else BASELINE_PROMPT_TEMPLATE
     prompt = template.format(jobs_block=jobs_block)
@@ -490,6 +517,7 @@ def build_prompt(jobs: list[dict[str, str]], optimized: bool) -> str:
 
 
 def extract_json_array(text: str) -> list[dict]:
+    """Pull a JSON array out of the model response (handles markdown fences)."""
     text = text.strip()
     if not text:
         raise ValueError("Empty model response")
@@ -545,6 +573,7 @@ def normalize_tag_item(item: dict) -> tuple[str, str] | None:
 def map_parsed_items(
     parsed: list, jobs: list[dict[str, str]]
 ) -> dict[str, str]:
+    """Map Gemini JSON items to {job_id: tech_stack}. Falls back to list order if ids missing."""
     id_to_stack: dict[str, str] = {}
     for item in parsed:
         if isinstance(item, dict):
@@ -585,6 +614,7 @@ def map_parsed_items(
 
 
 def is_transient_gemini_error(exc: Exception) -> bool:
+    """True if the error is a rate limit or overload (worth retrying)."""
     message = str(exc).upper()
     return any(
         token in message
@@ -593,12 +623,14 @@ def is_transient_gemini_error(exc: Exception) -> bool:
 
 
 def retry_wait_seconds(retry_delay: float, attempt: int, exc: Exception) -> float:
+    """How long to sleep before retrying; longer waits for rate-limit errors."""
     if is_transient_gemini_error(exc):
         return max(retry_delay * attempt, 15.0)
     return retry_delay * attempt
 
 
 def count_usage(response, prompt_text: str, response_text: str) -> TokenUsage:
+    """Read token counts from the API response, or estimate from text if missing."""
     usage = TokenUsage()
     metadata = getattr(response, "usage_metadata", None)
     if metadata:
@@ -615,6 +647,7 @@ def count_usage(response, prompt_text: str, response_text: str) -> TokenUsage:
 async def call_gemini(
     client: genai.Client, model: str, prompt: str
 ) -> tuple[str, TokenUsage]:
+    """Send one prompt to Gemini and return the text response plus token usage."""
     try:
         response = await client.aio.models.generate_content(
             model=model,
@@ -636,6 +669,7 @@ async def call_gemini(
 async def call_gemini_with_fallback(
     client: genai.Client, models: tuple[str, ...], prompt: str
 ) -> tuple[str, TokenUsage, str]:
+    """Try Gemini models in order until one succeeds; return text, usage, and model used."""
     last_error: Exception | None = None
     for model in models:
         try:
@@ -652,6 +686,7 @@ async def call_gemini_with_fallback(
 async def mcp_run_script(
     mcp_client: Client, script_name: str, params: list | None = None
 ) -> dict | list:
+    """Run a SQL file from queries/ via the MCP server and return parsed JSON."""
     raw = await mcp_client.call_tool(
         "run_sql_script",
         {"script_name": script_name, "params_json": json.dumps(params or [])},
@@ -663,6 +698,7 @@ async def mcp_run_script(
 
 
 async def fetch_untagged_jobs(mcp_client: Client) -> list[dict[str, str]]:
+    """Load all jobs whose tech_stack column is still empty."""
     result = await mcp_run_script(mcp_client, "select_untagged_jobs.sql")
     if isinstance(result, dict) and "error" in result:
         raise RuntimeError(result["error"])
@@ -672,6 +708,7 @@ async def fetch_untagged_jobs(mcp_client: Client) -> list[dict[str, str]]:
 async def update_job_stack(
     mcp_client: Client, source_id: str, tech_stack: str
 ) -> None:
+    """Write one job's tech_stack back to SQLite through MCP."""
     result = await mcp_run_script(
         mcp_client,
         "update_tech_stack.sql",
@@ -682,6 +719,7 @@ async def update_job_stack(
 
 
 def measure_tagging_quality(tech_stacks: list[str]) -> dict[str, float | int]:
+    """Bonus metrics: avg skills per job, duplicate rate, and very short tags."""
     if not tech_stacks:
         return {
             "jobs_measured": 0,
@@ -743,6 +781,11 @@ async def process_batch(
     retry_delay: float,
     usage: TokenUsage,
 ) -> list[str]:
+    """
+    Tag one batch of jobs with Gemini.
+
+    On failure: split the batch in half, or fall back to metadata for a single job.
+    """
     try:
         return await _process_batch_once(
             gemini_client,
@@ -805,6 +848,7 @@ async def _process_batch_once(
     retry_delay: float,
     usage: TokenUsage,
 ) -> list[str]:
+    """One attempt to tag a batch: prompt Gemini, parse JSON, update DB, log each job."""
     tagged_stacks: list[str] = []
     expected = len(jobs)
     models = tuple(dict.fromkeys((model, *FALLBACK_MODELS)))
@@ -863,6 +907,11 @@ async def _tag_data_async(
     model: str = DEFAULT_MODEL,
     optimized: bool = False,
 ) -> TaggingResult:
+    """
+    Main tagging pipeline: fetch untagged jobs, batch-call Gemini, write tech_stack via MCP.
+
+    Jobs with bad descriptions are tagged from title/company metadata instead of the LLM.
+    """
     api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("[Gemini Error] Missing GOOGLE_API_KEY or GEMINI_API_KEY.")
@@ -957,8 +1006,9 @@ async def _tag_data_async(
 
 def tag_data(db_url: str) -> dict[str, float | int]:
     """
-    Read untagged jobs from SQLite via MCP, populate tech_stack with Gemini,
-    and return token/time statistics.
+    Public entry point for Day 1-2 tagging.
+
+    Tags empty tech_stack rows, prints summary, returns token/time/quality stats.
     """
     optimized = os.environ.get("TAG_OPTIMIZED", "").lower() in {"1", "true", "yes"}
     model = os.environ.get("TAG_MODEL", DEFAULT_MODEL)
@@ -981,6 +1031,7 @@ def tag_data(db_url: str) -> dict[str, float | int]:
 
 
 async def _clear_tech_stack(db_url: str) -> None:
+    """Empty all tech_stack values (used before benchmark re-runs)."""
     mcp_client = _mcp_client(db_url)
     async with mcp_client:
         await mcp_run_script(mcp_client, "clear_tech_stack.sql")
@@ -1066,6 +1117,7 @@ async def run_benchmark(db_url: str, model: str = DEFAULT_MODEL) -> None:
 
 
 def main() -> None:
+    """CLI: tag a database, or run --benchmark to compare baseline vs optimized prompts."""
     parser = argparse.ArgumentParser(description="Tag job tech stacks with Gemini.")
     parser.add_argument(
         "db_url",

@@ -1,4 +1,8 @@
-"""MCP server for SQLite access via SQL scripts in queries/."""
+"""MCP server for SQLite access via SQL scripts in queries/.
+
+tag_data.py and find_skill_gaps.py talk to the database through this server
+instead of opening SQLite directly.
+"""
 
 import json
 import os
@@ -12,10 +16,12 @@ QUERIES_DIR = Path(__file__).resolve().parent / "queries"
 
 
 def _db_path() -> str:
+    """Database file path from DB_PATH env (set by the MCP client)."""
     return os.environ.get("DB_PATH", "data/jobs_d1.db")
 
 
 def _load_sql(script_name: str) -> str:
+    """Read a .sql file from the queries/ folder."""
     path = QUERIES_DIR / script_name
     if not path.exists():
         raise FileNotFoundError(f"SQL script not found: {script_name}")
@@ -24,7 +30,7 @@ def _load_sql(script_name: str) -> str:
 
 @mcp.tool
 def run_sql_script(script_name: str, params_json: str = "[]") -> str:
-    """Execute a SQL script from queries/ with optional JSON parameter list."""
+    """MCP tool: run a named SQL script; returns JSON rows or rows_affected."""
     try:
         sql = _load_sql(script_name)
         params = json.loads(params_json)

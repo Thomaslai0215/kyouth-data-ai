@@ -1,5 +1,12 @@
 """Day 3-4: Find skill gaps between a resume and tagged job demand.
 
+Pipeline overview:
+  1. Read resume file (.txt or .pdf)
+  2. Strip jailbreak lines, then ask Gemini for resume skills (temperature=0)
+  3. MCP loads all tech_stack values from tagged jobs
+  4. gaps = job skills minus resume skills (sorted, lowercase) — deterministic set math
+  5. Return SkillGapResult with gaps, tokens, time, and bonus stats
+
 The gap result is DETERMINISTIC: the LLM is only used to read skills out of the
 unstructured resume (temperature=0), then all gap logic is plain set math so two
 consecutive runs return identical `gaps`.
@@ -68,7 +75,7 @@ INJECTION_PATTERNS: tuple[str, ...] = (
 
 
 class SkillGapResult(BaseModel):
-    """Output contract for find_skill_gaps."""
+    """What find_skill_gaps returns: missing skills, token count, time, and stats."""
 
     gaps: list[str] = Field(default_factory=list)
     tokens: int = 0
@@ -76,11 +83,12 @@ class SkillGapResult(BaseModel):
     stats: dict = Field(default_factory=dict)
 
     def __str__(self) -> str:
+        """Pretty-print for the CLI (gaps, usage, demand stats)."""
         return format_skill_gap_result(self)
 
 
 def format_skill_gap_result(result: SkillGapResult) -> str:
-    """Human-readable CLI output (matches PDF fields: gaps, time, tokens)."""
+    """Turn a SkillGapResult into the text blocks printed by the CLI."""
     lines: list[str] = []
     stats = result.stats or {}
 
@@ -131,6 +139,7 @@ def format_skill_gap_result(result: SkillGapResult) -> str:
 # Deterministic skill parsing
 # --------------------------------------------------------------------------- #
 def normalize_skill(text: str) -> str:
+    """Lowercase a skill string and collapse extra spaces."""
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
@@ -160,6 +169,7 @@ def split_skills(raw: str) -> set[str]:
 
 
 def skills_from_list(items: list[str]) -> set[str]:
+    """Turn a list of skill strings (from the LLM) into a normalized skill set."""
     skills: set[str] = set()
     for item in items:
         skills |= split_skills(item)
@@ -278,6 +288,7 @@ Rules:
 
 
 def build_resume_prompt(resume_text: str, optimized: bool = True) -> str:
+    """Build the Gemini prompt that asks for resume skills as a JSON array."""
     if optimized and len(resume_text) > RESUME_CHAR_LIMIT:
         resume_text = resume_text[:RESUME_CHAR_LIMIT] + "..."
     template = OPTIMIZED_RESUME_PROMPT if optimized else BASELINE_RESUME_PROMPT
@@ -292,6 +303,7 @@ async def _extract_resume_skills(
     retry_delay: float,
     optimized: bool = True,
 ) -> list[str]:
+    """Call Gemini to read skills from the resume. Returns a JSON list of skill strings."""
     prompt = build_resume_prompt(resume_text, optimized=optimized)
     last_error: Exception | None = None
 
@@ -334,6 +346,7 @@ def build_stats(
     job_skill_count: int,
     resume_skill_count: int,
 ) -> dict:
+    """Build bonus stats: top missing skills, how often jobs need them, demand range."""
     gap_demand = {skill: demand[skill] for skill in gaps}
     top = sorted(gap_demand.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
     demands = list(gap_demand.values()) or [0]
@@ -382,6 +395,7 @@ async def _find_skill_gaps_async(
     job_demand: tuple[set[str], Counter] | None = None,
     redundant_job_parse: bool = False,
 ) -> SkillGapResult:
+    """Main pipeline: read resume, load job demand, compute gaps = job_skills - resume_skills."""
     start = time.perf_counter()
     usage = TokenUsage()
 
@@ -444,7 +458,7 @@ async def _find_skill_gaps_async(
 
 
 def find_skill_gaps(input_file_path: str, db_url: str) -> SkillGapResult:
-    """Read the jobs table + resume and return deterministic skill gaps."""
+    """Public entry point: compare resume skills to tagged job demand and return gaps."""
     model = os.environ.get("TAG_MODEL", DEFAULT_MODEL)
     optimized = os.environ.get("SKILL_GAPS_OPTIMIZED", "1").lower() in {
         "1",
@@ -547,6 +561,7 @@ async def run_benchmark(
 
 
 def main() -> None:
+    """CLI: run skill-gap analysis or --benchmark to compare baseline vs optimized."""
     parser = argparse.ArgumentParser(description="Find resume skill gaps vs job demand.")
     parser.add_argument(
         "input_file_path",

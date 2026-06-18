@@ -1,3 +1,5 @@
+"""Day 0: Send a prompt to Gemini (cloud) or Ollama (local) from the command line."""
+
 import json
 import os
 import sys
@@ -27,6 +29,7 @@ OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 
 def _print_available_models() -> None:
+    """Print the list of known Gemini and Ollama model names (shown on errors)."""
     print("\n--- AVAILABLE MODELS ---")
     print("Gemini:", ", ".join(sorted(GEMINI_MODELS)))
     print("Ollama:", ", ".join(sorted(OLLAMA_MODELS)))
@@ -41,6 +44,7 @@ def prompt_model(model: str, prompt: str) -> str:
 
 
 def _prompt_ollama(model: str, prompt: str) -> str:
+    """Call a local Ollama model via HTTP and return the text response."""
     payload = json.dumps(
         {"model": model, "prompt": prompt, "stream": False}
     ).encode()
@@ -68,6 +72,7 @@ def _prompt_ollama(model: str, prompt: str) -> str:
 
 
 def _prompt_gemini(model: str, prompt: str) -> str:
+    """Call Google Gemini with GOOGLE_API_KEY and return the text response."""
     api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return (
@@ -88,6 +93,7 @@ def _prompt_gemini(model: str, prompt: str) -> str:
 
 
 def main() -> None:
+    """CLI entry: uv run prompt_model.py <model> <prompt>"""
     if len(sys.argv) < 3:
         print("Usage: uv run prompt_model.py <model> <prompt>")
         sys.exit(1)
