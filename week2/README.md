@@ -13,7 +13,8 @@ week2/
 ├── prompt_model.py     # Day 0 LLM setup
 ├── rate_limits.txt
 ├── pyproject.toml
-└── .env                # GOOGLE_API_KEY (do not commit)
+├── .env.example        # Template for reviewers (safe to commit)
+└── .env                # GOOGLE_API_KEY, TAG_OPTIMIZED (do not commit)
 ```
 
 ## Where to put database files from `resources.zip`
@@ -42,9 +43,17 @@ uv run tag_data.py ../week1/data/3_gold/jobs.db
 ```bash
 cd week2
 uv sync
+cp .env.example .env   # Windows: copy .env.example .env
 ```
 
-Add `GOOGLE_API_KEY` to `week2/.env`.
+Edit `week2/.env`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `GOOGLE_API_KEY` | Yes | Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) |
+| `TAG_OPTIMIZED` | No | Set to `1` to use the shorter optimized prompt (recommended for normal runs) |
+
+`.env` is gitignored. Commit `.env.example` only — it has no secrets and shows reviewers what to configure.
 
 Install Ollama models (Day 0) and update `rate_limits.txt` from AI Studio.
 
@@ -53,18 +62,20 @@ Install Ollama models (Day 0) and update `rate_limits.txt` from AI Studio.
 ```bash
 cd week2
 
-# Default: data/jobs_d1.db
+# Default: data/jobs_d1.db (uses TAG_OPTIMIZED from .env if set)
 uv run tag_data.py
 
 # Custom database path
 uv run tag_data.py data/jobs_d1.db
 
-# Optional: optimized prompt mode
-TAG_OPTIMIZED=1 uv run tag_data.py
+# One-off optimized run without editing .env (PowerShell)
+$env:TAG_OPTIMIZED=1; uv run tag_data.py
 
 # Bonus benchmark: baseline vs optimized (>5% improvement proof)
 uv run tag_data.py --benchmark
 ```
+
+**Prompt modes:** With `TAG_OPTIMIZED=1` in `.env`, normal runs use the optimized prompt automatically. Without it, the baseline (longer) prompt is used. Use `--benchmark` to compare both and print token/time savings.
 
 ## Day 0: prompt_model.py
 
