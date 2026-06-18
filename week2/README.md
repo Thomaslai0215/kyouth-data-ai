@@ -66,13 +66,6 @@ TAG_OPTIMIZED=1 uv run tag_data.py
 uv run tag_data.py --benchmark
 ```
 
-### Optional sample database (testing only)
-
-```bash
-uv run python scripts/prepare_sample_db.py
-uv run tag_data.py
-```
-
 ## Day 0: prompt_model.py
 
 ```bash

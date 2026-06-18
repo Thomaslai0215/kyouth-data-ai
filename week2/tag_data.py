@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from fastmcp import Client
 from fastmcp.client.transports import PythonStdioTransport
 from google import genai
+from google.genai import types
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -22,7 +23,13 @@ WEEK2_DIR = Path(__file__).resolve().parent
 DB_SERVER_PATH = WEEK2_DIR / "db_server.py"
 DEFAULT_DB_PATH = WEEK2_DIR / "data" / "jobs_d1.db"
 RATE_LIMITS_PATH = WEEK2_DIR / "rate_limits.txt"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
+FALLBACK_MODELS = (
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+)
 
 
 def _mcp_client(db_url: str) -> Client:
@@ -57,8 +64,74 @@ OPTIMIZED_PROMPT_TEMPLATE = """Extract tech stack per job. JSON array only:
 {jobs_block}
 """
 
-MAX_BATCH_ATTEMPTS = 3
+MAX_BATCH_ATTEMPTS = 5
 DESCRIPTION_CHAR_LIMIT = 1200
+MAX_BATCH_SIZE = 4
+MIN_MEANINGFUL_CHARS = 40
+
+# Known technologies/tools — matched anywhere in title or company (longer names first).
+TECH_TERMS: tuple[tuple[str, str], ...] = (
+    ("machine learning", "Machine Learning"),
+    ("node.js", "Node.js"),
+    ("power bi", "Power BI"),
+    ("spring boot", "Spring Boot"),
+    ("google cloud", "Google Cloud"),
+    ("alibaba cloud", "Alibaba Cloud"),
+    ("javascript", "JavaScript"),
+    ("typescript", "TypeScript"),
+    ("postgresql", "PostgreSQL"),
+    ("kubernetes", "Kubernetes"),
+    ("tensorflow", "TensorFlow"),
+    ("pytorch", "PyTorch"),
+    ("mongodb", "MongoDB"),
+    ("docker", "Docker"),
+    ("python", "Python"),
+    ("java", "Java"),
+    ("php", "PHP"),
+    ("node", "Node.js"),
+    ("react", "React"),
+    ("angular", "Angular"),
+    ("vue", "Vue"),
+    ("aws", "AWS"),
+    ("azure", "Azure"),
+    ("gcp", "Google Cloud"),
+    ("sql", "SQL"),
+    ("mysql", "MySQL"),
+    ("linux", "Linux"),
+    ("git", "Git"),
+    ("api", "API"),
+    ("rag", "RAG"),
+    ("ai", "AI"),
+    ("ml", "Machine Learning"),
+    ("etl", "ETL"),
+    ("ci/cd", "CI/CD"),
+)
+
+# Generic role/domain hints when few explicit tech terms are found.
+ROLE_TERMS: tuple[tuple[str, str], ...] = (
+    ("full stack", "Full Stack Development"),
+    ("data engineer", "Data Engineering"),
+    ("data analyst", "Data Analysis"),
+    ("software engineer", "Software Engineering"),
+    ("backend", "Backend Development"),
+    ("frontend", "Frontend Development"),
+    ("devops", "DevOps"),
+    ("programmer", "Programming"),
+    ("developer", "Software Development"),
+    ("engineer", "Engineering"),
+    ("analyst", "Analysis"),
+    ("automation", "Automation"),
+)
+
+BOILERPLATE_PHRASES: tuple[str, ...] = (
+    "job description",
+    "key responsibilities",
+    "qualifications",
+    "requirements",
+    "about the role",
+    "about us",
+    "responsibilities",
+)
 
 
 @dataclass
@@ -141,11 +214,11 @@ def calculate_batch_settings(
     tokens_per_job = max(avg_tokens_per_job, 100)
     tpm_budget_per_request = int(limits.tpm * 0.35)
     batch_size = max(
-        1, min(8, (tpm_budget_per_request - prompt_overhead) // tokens_per_job)
+        1, min(MAX_BATCH_SIZE, (tpm_budget_per_request - prompt_overhead) // tokens_per_job)
     )
     formula = (
         f"retry_delay=60/RPM={retry_delay:.1f}s; "
-        f"batch_size=min(8, floor(TPM*0.35-{prompt_overhead})/{tokens_per_job})={batch_size}"
+        f"batch_size=min({MAX_BATCH_SIZE}, floor(TPM*0.35-{prompt_overhead})/{tokens_per_job})={batch_size}"
     )
     return BatchSettings(
         batch_size=batch_size,
@@ -165,35 +238,203 @@ def truncate_description(description: str, limit: int = DESCRIPTION_CHAR_LIMIT) 
     return description[:limit] + "..."
 
 
+def _strip_boilerplate(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text.lower()).strip()
+    for phrase in BOILERPLATE_PHRASES:
+        cleaned = cleaned.replace(phrase, " ")
+    return re.sub(r"\s+", " ", cleaned).strip(" :;")
+
+
+def is_insufficient_description(description: str) -> bool:
+    """True when description is empty or mostly boilerplate — not usable for LLM tagging."""
+    text = (description or "").strip()
+    if not text:
+        return True
+
+    meaningful = _strip_boilerplate(text)
+    return len(meaningful) < MIN_MEANINGFUL_CHARS
+
+
+def _metadata_text(job: dict[str, str]) -> str:
+    """Combine title, company, optional description, and title fragments split on separators."""
+    title = (job.get("job_title") or "").strip()
+    company = (job.get("company") or "").strip()
+    description = _strip_boilerplate((job.get("description") or "").strip())
+    title_parts = re.split(r"[/,|&\-–()]+", title)
+    parts = [title, company, *title_parts]
+    if description:
+        parts.append(description)
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
+def _extract_terms(text: str, term_map: tuple[tuple[str, str], ...]) -> list[str]:
+    lowered = text.lower()
+    found: list[str] = []
+    seen: set[str] = set()
+    for needle, label in sorted(term_map, key=lambda item: -len(item[0])):
+        if needle in lowered:
+            key = label.lower()
+            if key not in seen:
+                seen.add(key)
+                found.append(label)
+    return found
+
+
+def infer_tech_stack_from_metadata(job: dict[str, str]) -> str:
+    """Infer a best-effort tech stack from job title and company when description is unusable."""
+    text = _metadata_text(job)
+    skills = _extract_terms(text, TECH_TERMS)
+    if len(skills) < 3:
+        for label in _extract_terms(text, ROLE_TERMS):
+            if label.lower() not in {skill.lower() for skill in skills}:
+                skills.append(label)
+
+    if not skills:
+        return "software development"
+    return ", ".join(skills[:8])
+
+
+def split_jobs_for_tagging(
+    jobs: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Separate unusual jobs (thin descriptions) from jobs suitable for LLM batch tagging."""
+    metadata_jobs: list[dict[str, str]] = []
+    llm_jobs: list[dict[str, str]] = []
+    for job in jobs:
+        if is_insufficient_description(job.get("description") or ""):
+            metadata_jobs.append(job)
+        else:
+            llm_jobs.append(job)
+    return metadata_jobs, llm_jobs
+
+
 def build_jobs_block(jobs: list[dict[str, str]]) -> str:
     lines: list[str] = []
     for job in jobs:
         job_id = job["source_id"]
+        job_title = (job.get("job_title") or "").strip()
+        company = (job.get("company") or "").strip()
         description = truncate_description(job.get("description") or "")
-        lines.append(f"ID: {job_id}\nDescription: {description}\n")
+        lines.append(
+            f"ID: {job_id}\nTitle: {job_title}\nCompany: {company}\nDescription: {description}\n"
+        )
     return "\n".join(lines)
 
 
 def build_prompt(jobs: list[dict[str, str]], optimized: bool) -> str:
     jobs_block = build_jobs_block(jobs)
     template = OPTIMIZED_PROMPT_TEMPLATE if optimized else BASELINE_PROMPT_TEMPLATE
-    return template.format(jobs_block=jobs_block)
+    prompt = template.format(jobs_block=jobs_block)
+    return f"Return exactly {len(jobs)} JSON objects (one per job id).\n{prompt}"
 
 
 def extract_json_array(text: str) -> list[dict]:
     text = text.strip()
+    if not text:
+        raise ValueError("Empty model response")
     fence_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
     if fence_match:
         text = fence_match.group(1)
     else:
         start = text.find("[")
         end = text.rfind("]")
-        if start != -1 and end != -1:
+        if start == -1 or end == -1:
+            obj_start = text.find("{")
+            obj_end = text.rfind("}")
+            if obj_start != -1 and obj_end != -1:
+                text = text[obj_start : obj_end + 1]
+        else:
             text = text[start : end + 1]
     data = json.loads(text)
+    if isinstance(data, dict):
+        for key in ("results", "jobs", "data", "items", "responses"):
+            nested = data.get(key)
+            if isinstance(nested, list):
+                return nested
+        raise ValueError("Response JSON object does not contain a results array")
     if not isinstance(data, list):
         raise ValueError("Response is not a JSON array")
     return data
+
+
+def normalize_tag_item(item: dict) -> tuple[str, str] | None:
+    """Accept common Gemini key variants for job id and tech stack."""
+    job_id = ""
+    for key in ("id", "job_id", "source_id", "ID", "jobId"):
+        if key in item and item[key] not in (None, ""):
+            job_id = str(item[key]).strip()
+            break
+
+    stack = ""
+    for key in ("tech_stack", "techStack", "skills", "stack", "technical_stack"):
+        if key not in item or item[key] in (None, ""):
+            continue
+        value = item[key]
+        if isinstance(value, list):
+            stack = ", ".join(str(skill).strip() for skill in value if str(skill).strip())
+        else:
+            stack = str(value).strip()
+        break
+
+    if job_id and stack:
+        return job_id, stack
+    return None
+
+
+def map_parsed_items(
+    parsed: list, jobs: list[dict[str, str]]
+) -> dict[str, str]:
+    id_to_stack: dict[str, str] = {}
+    for item in parsed:
+        if isinstance(item, dict):
+            normalized = normalize_tag_item(item)
+            if normalized:
+                job_id, stack = normalized
+                id_to_stack[job_id] = stack
+        elif isinstance(item, str) and item.strip():
+            continue
+
+    expected_ids = {str(job["source_id"]) for job in jobs}
+    if expected_ids.issubset(id_to_stack.keys()):
+        return id_to_stack
+
+    # Positional fallback when model returns stacks in order but wrong/missing ids.
+    if len(parsed) == len(jobs):
+        for job, item in zip(jobs, parsed):
+            source_id = str(job["source_id"])
+            if source_id in id_to_stack:
+                continue
+            if isinstance(item, dict):
+                for key in ("tech_stack", "techStack", "skills", "stack"):
+                    if key in item and item[key]:
+                        value = item[key]
+                        if isinstance(value, list):
+                            stack = ", ".join(
+                                str(v).strip() for v in value if str(v).strip()
+                            )
+                        else:
+                            stack = str(value).strip()
+                        if stack:
+                            id_to_stack[source_id] = stack
+                            break
+            elif isinstance(item, str) and item.strip():
+                id_to_stack[source_id] = item.strip()
+
+    return id_to_stack
+
+
+def is_transient_gemini_error(exc: Exception) -> bool:
+    message = str(exc).upper()
+    return any(
+        token in message
+        for token in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOADED")
+    )
+
+
+def retry_wait_seconds(retry_delay: float, attempt: int, exc: Exception) -> float:
+    if is_transient_gemini_error(exc):
+        return max(retry_delay * attempt, 15.0)
+    return retry_delay * attempt
 
 
 def count_usage(response, prompt_text: str, response_text: str) -> TokenUsage:
@@ -213,10 +454,38 @@ def count_usage(response, prompt_text: str, response_text: str) -> TokenUsage:
 async def call_gemini(
     client: genai.Client, model: str, prompt: str
 ) -> tuple[str, TokenUsage]:
-    response = await client.aio.models.generate_content(model=model, contents=prompt)
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"[Gemini Error] {exc}") from exc
+
     text = (response.text or "").strip()
+    if not text:
+        raise RuntimeError("[Gemini Error] Empty response from model.")
     usage = count_usage(response, prompt, text)
     return text, usage
+
+
+async def call_gemini_with_fallback(
+    client: genai.Client, models: tuple[str, ...], prompt: str
+) -> tuple[str, TokenUsage, str]:
+    last_error: Exception | None = None
+    for model in models:
+        try:
+            text, usage = await call_gemini(client, model, prompt)
+            return text, usage, model
+        except Exception as exc:
+            last_error = exc
+            if is_transient_gemini_error(exc):
+                continue
+            raise
+    raise RuntimeError(str(last_error or "All Gemini models failed"))
 
 
 async def mcp_run_script(
@@ -286,7 +555,86 @@ def measure_tagging_quality(tech_stacks: list[str]) -> dict[str, float | int]:
     }
 
 
+async def tag_jobs_from_metadata(
+    mcp_client: Client, jobs: list[dict[str, str]]
+) -> list[str]:
+    """Tag unusual jobs locally using title/company metadata when description is unusable."""
+    tagged_stacks: list[str] = []
+    for job in jobs:
+        source_id = str(job["source_id"])
+        tech_stack = infer_tech_stack_from_metadata(job)
+        await update_job_stack(mcp_client, source_id, tech_stack)
+        print(
+            f"Analyzed Job {source_id}: {tech_stack} (inferred from metadata)",
+            flush=True,
+        )
+        tagged_stacks.append(tech_stack)
+    return tagged_stacks
+
+
 async def process_batch(
+    gemini_client: genai.Client,
+    mcp_client: Client,
+    batch_index: int,
+    jobs: list[dict[str, str]],
+    model: str,
+    optimized: bool,
+    retry_delay: float,
+    usage: TokenUsage,
+) -> list[str]:
+    try:
+        return await _process_batch_once(
+            gemini_client,
+            mcp_client,
+            batch_index,
+            jobs,
+            model,
+            optimized,
+            retry_delay,
+            usage,
+        )
+    except Exception as exc:
+        if len(jobs) == 1:
+            job = jobs[0]
+            tech_stack = infer_tech_stack_from_metadata(job)
+            await update_job_stack(mcp_client, str(job["source_id"]), tech_stack)
+            print(
+                f"Analyzed Job {job['source_id']}: {tech_stack} "
+                f"(inferred from metadata after LLM failure: {exc})",
+                flush=True,
+            )
+            return [tech_stack]
+        if len(jobs) > 1:
+            print(
+                f"[Batch {batch_index}] Splitting batch of {len(jobs)} after failure: {exc}",
+                flush=True,
+            )
+            mid = len(jobs) // 2
+            left = await process_batch(
+                gemini_client,
+                mcp_client,
+                batch_index,
+                jobs[:mid],
+                model,
+                optimized,
+                retry_delay,
+                usage,
+            )
+            right = await process_batch(
+                gemini_client,
+                mcp_client,
+                batch_index,
+                jobs[mid:],
+                model,
+                optimized,
+                retry_delay,
+                usage,
+            )
+            return left + right
+        raise
+
+
+async def _process_batch_once(
     gemini_client: genai.Client,
     mcp_client: Client,
     batch_index: int,
@@ -298,32 +646,38 @@ async def process_batch(
 ) -> list[str]:
     tagged_stacks: list[str] = []
     expected = len(jobs)
+    models = tuple(dict.fromkeys((model, *FALLBACK_MODELS)))
 
     for attempt in range(1, MAX_BATCH_ATTEMPTS + 1):
         try:
             prompt = build_prompt(jobs, optimized=optimized)
-            response_text, batch_usage = await call_gemini(
-                gemini_client, model, prompt
+            response_text, batch_usage, model_used = await call_gemini_with_fallback(
+                gemini_client, models, prompt
             )
             usage.add(batch_usage)
+            if model_used != model:
+                print(f"[Batch {batch_index}] Used fallback model: {model_used}")
 
             parsed = extract_json_array(response_text)
             if len(parsed) != expected:
                 raise ValueError("Mismatch between batch size and response")
 
-            id_to_stack: dict[str, str] = {}
-            for item in parsed:
-                job_id = str(item.get("id", "")).strip()
-                stack = str(item.get("tech_stack", "")).strip()
-                if not job_id or not stack:
-                    raise ValueError("Missing id or tech_stack in response item")
-                id_to_stack[job_id] = stack
+            id_to_stack = map_parsed_items(parsed, jobs)
 
+            resolved: list[tuple[str, str]] = []
             for job in jobs:
-                source_id = job["source_id"]
-                if source_id not in id_to_stack:
+                source_id = str(job["source_id"])
+                tech_stack = id_to_stack.get(source_id)
+                if not tech_stack:
+                    for key, value in id_to_stack.items():
+                        if str(key) == source_id:
+                            tech_stack = value
+                            break
+                if not tech_stack:
                     raise ValueError(f"Missing tagged result for job {source_id}")
-                tech_stack = id_to_stack[source_id]
+                resolved.append((source_id, tech_stack))
+
+            for source_id, tech_stack in resolved:
                 await update_job_stack(mcp_client, source_id, tech_stack)
                 print(f"Analyzed Job {source_id}: {tech_stack}")
                 tagged_stacks.append(tech_stack)
@@ -336,19 +690,9 @@ async def process_batch(
                 flush=True,
             )
             if attempt < MAX_BATCH_ATTEMPTS:
-                await asyncio.sleep(retry_delay * attempt)
-            else:
-                for job in jobs:
-                    fallback = "general software development"
-                    await update_job_stack(mcp_client, job["source_id"], fallback)
-                    print(
-                        f"Analyzed Job {job['source_id']}: {fallback} (fallback)",
-                        flush=True,
-                    )
-                    tagged_stacks.append(fallback)
-                return tagged_stacks
+                await asyncio.sleep(retry_wait_seconds(retry_delay, attempt, exc))
 
-    return tagged_stacks
+    raise RuntimeError(f"Batch {batch_index} failed after {MAX_BATCH_ATTEMPTS} attempts")
 
 
 async def _tag_data_async(
@@ -378,15 +722,35 @@ async def _tag_data_async(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 return TaggingResult(tokens=usage, time_ms=elapsed_ms, jobs_tagged=0)
 
+            metadata_jobs, llm_jobs = split_jobs_for_tagging(jobs)
+            if metadata_jobs:
+                print(
+                    f"Tagging {len(metadata_jobs)} unusual job(s) from metadata "
+                    f"(insufficient description)"
+                )
+                tagged_stacks.extend(
+                    await tag_jobs_from_metadata(mcp_client, metadata_jobs)
+                )
+
+            if not llm_jobs:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return TaggingResult(
+                    tokens=usage,
+                    time_ms=elapsed_ms,
+                    jobs_tagged=len(tagged_stacks),
+                    quality=measure_tagging_quality(tagged_stacks),
+                )
+
             print(
                 f"Model: {model} | Batch size: {settings.batch_size} | "
-                f"Retry delay: {settings.retry_delay_seconds:.1f}s"
+                f"Retry delay: {settings.retry_delay_seconds:.1f}s | "
+                f"LLM jobs: {len(llm_jobs)}"
             )
             print(f"Rate limit formula: {settings.formula_note}")
 
             batch_index = 0
-            for offset in range(0, len(jobs), settings.batch_size):
-                batch = jobs[offset : offset + settings.batch_size]
+            for offset in range(0, len(llm_jobs), settings.batch_size):
+                batch = llm_jobs[offset : offset + settings.batch_size]
                 stacks = await process_batch(
                     gemini_client,
                     mcp_client,
@@ -399,7 +763,7 @@ async def _tag_data_async(
                 )
                 tagged_stacks.extend(stacks)
                 batch_index += 1
-                if offset + settings.batch_size < len(jobs):
+                if offset + settings.batch_size < len(llm_jobs):
                     await asyncio.sleep(settings.retry_delay_seconds)
 
     except Exception as exc:
@@ -496,7 +860,7 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help="Gemini model name (default: gemini-2.5-flash)",
+        help="Gemini model name (default: gemini-3.1-flash-lite)",
     )
     args = parser.parse_args()
 
