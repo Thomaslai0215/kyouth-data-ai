@@ -23,6 +23,7 @@ OLLAMA_MODELS = {
     "llama3.1",
     "phi3",
     "deepseek-r1:1.5b",
+    "qwen3.5",
 }
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
