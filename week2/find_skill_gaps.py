@@ -41,8 +41,8 @@ from tag_data import (
     retry_wait_seconds,
 )
 
-DEFAULT_RESUME_PATH = WEEK2_DIR / "data" / "resume_d3.txt"
-DEFAULT_DB_PATH = WEEK2_DIR / "data" / "jobs_d1.db"
+DEFAULT_RESUME_PATH = WEEK2_DIR / "data" / "resume_d3_eval.txt"
+DEFAULT_DB_PATH = WEEK2_DIR / "data" / "jobs_d3_eval.db"
 DATA_DIR = WEEK2_DIR / "data"
 RESUME_CHAR_LIMIT = 1200
 
