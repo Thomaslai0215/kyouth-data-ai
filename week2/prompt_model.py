@@ -45,9 +45,7 @@ def prompt_model(model: str, prompt: str) -> str:
 
 def _prompt_ollama(model: str, prompt: str) -> str:
     """Call a local Ollama model via HTTP and return the text response."""
-    payload = json.dumps(
-        {"model": model, "prompt": prompt, "stream": False}
-    ).encode()
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
     request = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/generate",
         data=payload,
@@ -75,9 +73,7 @@ def _prompt_gemini(model: str, prompt: str) -> str:
     """Call Google Gemini with GOOGLE_API_KEY and return the text response."""
     api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return (
-            "[Gemini Error] Missing GOOGLE_API_KEY or GEMINI_API_KEY environment variable."
-        )
+        return "[Gemini Error] Missing GOOGLE_API_KEY or GEMINI_API_KEY environment variable."
 
     try:
         from google import genai

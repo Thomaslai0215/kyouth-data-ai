@@ -268,8 +268,7 @@ def estimate_avg_tokens_per_job(
     per_job_tokens: list[int] = []
     for job in jobs:
         text = " ".join(
-            str(job.get(key, "") or "")
-            for key in ("title", "company", "description")
+            str(job.get(key, "") or "") for key in ("title", "company", "description")
         )
         per_job_tokens.append(estimate_tokens(text) + 80)
 
@@ -419,7 +418,9 @@ def is_vague_skill(skill: str) -> bool:
         return True
     if normalized in VAGUE_SKILL_TERMS:
         return True
-    if compact in {term.replace(" ", "").replace("/", "") for term in VAGUE_SKILL_TERMS}:
+    if compact in {
+        term.replace(" ", "").replace("/", "") for term in VAGUE_SKILL_TERMS
+    }:
         return True
     for term in VAGUE_SKILL_TERMS:
         if normalized == term or normalized.startswith(f"{term} "):
@@ -560,7 +561,9 @@ def normalize_tag_item(item: dict) -> tuple[str, str] | None:
             continue
         value = item[key]
         if isinstance(value, list):
-            stack = ", ".join(str(skill).strip() for skill in value if str(skill).strip())
+            stack = ", ".join(
+                str(skill).strip() for skill in value if str(skill).strip()
+            )
         else:
             stack = str(value).strip()
         break
@@ -570,9 +573,7 @@ def normalize_tag_item(item: dict) -> tuple[str, str] | None:
     return None
 
 
-def map_parsed_items(
-    parsed: list, jobs: list[dict[str, str]]
-) -> dict[str, str]:
+def map_parsed_items(parsed: list, jobs: list[dict[str, str]]) -> dict[str, str]:
     """Map Gemini JSON items to {job_id: tech_stack}. Falls back to list order if ids missing."""
     id_to_stack: dict[str, str] = {}
     for item in parsed:
@@ -705,9 +706,7 @@ async def fetch_untagged_jobs(mcp_client: Client) -> list[dict[str, str]]:
     return result
 
 
-async def update_job_stack(
-    mcp_client: Client, source_id: str, tech_stack: str
-) -> None:
+async def update_job_stack(mcp_client: Client, source_id: str, tech_stack: str) -> None:
     """Write one job's tech_stack back to SQLite through MCP."""
     result = await mcp_run_script(
         mcp_client,
@@ -899,7 +898,9 @@ async def _process_batch_once(
             if attempt < MAX_BATCH_ATTEMPTS:
                 await asyncio.sleep(retry_wait_seconds(retry_delay, attempt, exc))
 
-    raise RuntimeError(f"Batch {batch_index} failed after {MAX_BATCH_ATTEMPTS} attempts")
+    raise RuntimeError(
+        f"Batch {batch_index} failed after {MAX_BATCH_ATTEMPTS} attempts"
+    )
 
 
 async def _tag_data_async(
@@ -1052,7 +1053,9 @@ def _print_tagging_summary(label: str, result: TaggingResult) -> None:
             print(f"{key}: {value}")
 
 
-def _print_benchmark_comparison(baseline: TaggingResult, optimized: TaggingResult) -> None:
+def _print_benchmark_comparison(
+    baseline: TaggingResult, optimized: TaggingResult
+) -> None:
     """Side-by-side comparison after both benchmark runs."""
     print("=== COMPARISON SUMMARY ===")
     print(f"Baseline tokens: {baseline.tokens.total}")

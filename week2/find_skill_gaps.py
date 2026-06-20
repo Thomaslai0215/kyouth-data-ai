@@ -135,6 +135,7 @@ def format_skill_gap_result(result: SkillGapResult) -> str:
 
     return "\n".join(lines)
 
+
 # --------------------------------------------------------------------------- #
 # Deterministic skill parsing
 # --------------------------------------------------------------------------- #
@@ -331,7 +332,9 @@ async def _extract_resume_skills(
                 if is_transient_gemini_error(exc):
                     continue
                 break
-        await asyncio.sleep(retry_wait_seconds(retry_delay, attempt, last_error or Exception()))
+        await asyncio.sleep(
+            retry_wait_seconds(retry_delay, attempt, last_error or Exception())
+        )
 
     print(f"[Skill Gaps] LLM extraction failed, continuing without it: {last_error}")
     return []
@@ -430,7 +433,9 @@ async def _find_skill_gaps_async(
         clean_skills = [s for s in raw_skills if is_plausible_skill(s)]
         resume_skills = skills_from_list(clean_skills)
     else:
-        print("[Skill Gaps] Missing GOOGLE_API_KEY/GEMINI_API_KEY; treating resume as empty.")
+        print(
+            "[Skill Gaps] Missing GOOGLE_API_KEY/GEMINI_API_KEY; treating resume as empty."
+        )
 
     # Job demand from the tagged jobs table, fetched indirectly via MCP.
     job_skills: set[str] = set()
@@ -499,9 +504,7 @@ def _print_skill_gap_benchmark_comparison(
 
     print("")
     if baseline.tokens > 0:
-        token_saving = (
-            (baseline.tokens - optimized.tokens) / baseline.tokens
-        ) * 100
+        token_saving = ((baseline.tokens - optimized.tokens) / baseline.tokens) * 100
         token_delta = baseline.tokens - optimized.tokens
         print(
             f"Token change: {token_saving:.1f}% "
@@ -562,7 +565,9 @@ async def run_benchmark(
 
 def main() -> None:
     """CLI: run skill-gap analysis or --benchmark to compare baseline vs optimized."""
-    parser = argparse.ArgumentParser(description="Find resume skill gaps vs job demand.")
+    parser = argparse.ArgumentParser(
+        description="Find resume skill gaps vs job demand."
+    )
     parser.add_argument(
         "input_file_path",
         nargs="?",
