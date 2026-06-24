@@ -30,7 +30,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 WEEK2_DIR = Path(__file__).resolve().parent
 DB_SERVER_PATH = WEEK2_DIR / "db_server.py"
-DEFAULT_DB_PATH = WEEK2_DIR / "data" / "jobs_d1.db"
+DEFAULT_DB_PATH = WEEK2_DIR / "data" / "jobs_d3_eval.db"
 RATE_LIMITS_PATH = WEEK2_DIR / "rate_limits.txt"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 FALLBACK_MODELS = (
