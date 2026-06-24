@@ -2,9 +2,59 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Frontend</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resume Helper Chatbot</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <link href="/static/chat.css" rel="stylesheet" />
   </head>
   <body>
-    <h1>{{ message }}</h1>
+    <main class="chat-shell">
+      <div id="chat-history" class="chat-history">
+        <div class="chat-message bot-message">
+          <div class="message-text">Hi! How can I help you today?</div>
+        </div>
+      </div>
+
+      <form id="chat-form" class="chat-input-bar">
+        <input
+          type="file"
+          id="pdf-input"
+          class="visually-hidden"
+          accept="application/pdf,.pdf"
+        />
+        <button
+          type="button"
+          id="upload-btn"
+          class="upload-btn"
+          aria-label="Upload PDF"
+          title="Upload PDF"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <input
+          type="text"
+          id="message-input"
+          class="message-input"
+          placeholder="Type a message..."
+          autocomplete="off"
+        />
+        <button type="submit" class="send-btn">Send</button>
+      </form>
+    </main>
+
+    <script>
+      window.BACKEND_URL = {{ backend_url | tojson }};
+    </script>
+    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="/static/chat.js"></script>
   </body>
 </html>

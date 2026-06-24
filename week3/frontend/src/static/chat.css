@@ -1,0 +1,126 @@
+:root {
+  --chat-purple: #8f84c8;
+  --chat-purple-dark: #7a6fb8;
+  --chat-border: #d9d9d9;
+  --chat-bg: #f7f6f3;
+  --chat-panel: #faf9f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #ffffff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #222222;
+}
+
+.chat-shell {
+  width: min(760px, calc(100% - 2rem));
+  margin: 2.5rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.chat-history {
+  min-height: 520px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  border: 1px solid var(--chat-border);
+  border-radius: 18px;
+  background: var(--chat-panel);
+}
+
+.chat-message {
+  max-width: 75%;
+  padding: 0.9rem 1.1rem;
+  border-radius: 16px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.bot-message {
+  align-self: flex-start;
+  background: #ffffff;
+  border: 1px solid var(--chat-border);
+}
+
+.user-message {
+  align-self: flex-end;
+  background: var(--chat-purple);
+  color: #ffffff;
+}
+
+.message-text {
+  white-space: pre-wrap;
+}
+
+.chat-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--chat-border);
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--chat-border);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #666666;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.upload-btn:hover {
+  background: var(--chat-bg);
+}
+
+.upload-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.message-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 1rem;
+  padding: 0.35rem 0.25rem;
+}
+
+.message-input::placeholder {
+  color: #a0a0a0;
+}
+
+.send-btn {
+  border: none;
+  border-radius: 12px;
+  background: var(--chat-purple);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.7rem 1.4rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.send-btn:hover {
+  background: var(--chat-purple-dark);
+}
