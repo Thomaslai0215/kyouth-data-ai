@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Database Dashboard</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <link href="/static/chat.css" rel="stylesheet" />
+    <link href="/static/dashboard.css" rel="stylesheet" />
+  </head>
+  <body>
+    <nav class="app-nav">
+      <a href="/">Chat</a>
+      <a href="/dashboard" class="active">Dashboard</a>
+    </nav>
+
+    <main class="dashboard-shell">
+      <header class="dashboard-header">
+        <h1>Week 1 Job Database</h1>
+        <p id="total-jobs" class="dashboard-subtitle">Loading...</p>
+      </header>
+
+      <section class="search-panel">
+        <label for="search-input" class="form-label">Search jobs</label>
+        <div class="search-row">
+          <input
+            type="search"
+            id="search-input"
+            class="form-control"
+            placeholder="Search by title, company, or description..."
+          />
+          <button type="button" id="search-btn" class="btn btn-primary">Search</button>
+        </div>
+        <p id="search-status" class="search-status">Type a keyword and press Search.</p>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Job title</th>
+                <th>Company</th>
+                <th>Description (preview)</th>
+              </tr>
+            </thead>
+            <tbody id="search-results"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="charts-row">
+        <div class="chart-card">
+          <h2>Company Counts</h2>
+          <canvas id="company-chart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Top job titles</h2>
+          <canvas id="title-chart"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/vendor/chart.js"></script>
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>

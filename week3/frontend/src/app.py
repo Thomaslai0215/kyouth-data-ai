@@ -3,10 +3,12 @@ from io import BytesIO
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pypdf import PdfReader
+
+from jobs_db import company_counts, search_jobs, title_counts, total_jobs
 
 WEEK3_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = Path(__file__).resolve().parent
@@ -36,6 +38,32 @@ def home(request: Request):
         name="chat_page.html",
         context={"backend_url": backend_url},
     )
+
+
+@app.get("/dashboard")
+def dashboard(request: Request):
+    return templates.TemplateResponse(request=request, name="dashboard.html")
+
+
+@app.get("/api/jobs/stats")
+def jobs_stats():
+    try:
+        return {
+            "total": total_jobs(),
+            "companies": company_counts(),
+            "titles": title_counts(),
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/search")
+def jobs_search(q: str = Query("", min_length=1)):
+    try:
+        results, total = search_jobs(q)
+        return {"results": results, "total": total, "shown": len(results)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/pdf-to-text")

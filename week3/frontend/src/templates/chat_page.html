@@ -8,6 +8,11 @@
     <link href="/static/chat.css" rel="stylesheet" />
   </head>
   <body>
+    <nav class="app-nav">
+      <a href="/" class="active">Chat</a>
+      <a href="/dashboard">Dashboard</a>
+    </nav>
+
     <main class="chat-shell">
       <div id="chat-history" class="chat-history">
         <div class="chat-message bot-message">
@@ -70,6 +75,6 @@
       window.BACKEND_URL = {{ backend_url | tojson }};
     </script>
     <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-    <script src="/static/chat.js?v=3"></script>
+    <script src="/static/chat.js"></script>
   </body>
 </html>

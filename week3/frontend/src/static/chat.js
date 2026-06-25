@@ -71,7 +71,7 @@ async function loadPdfFile(file) {
   appendMessage("user", `Uploaded resume: ${file.name}`);
   appendMessage(
     "bot",
-    'Resume ready. Type "start analysis" or press Send to run skill-gap analysis.'
+    'Resume ready. Ask about your resume, or type "start analysis" / press Send for skill gaps.'
   );
 }
 
@@ -136,18 +136,6 @@ async function sendToBackend(message, pdfText) {
   return await response.text();
 }
 
-function isAnalysisRequest(message) {
-  if (!message) {
-    return true;
-  }
-  const normalized = message.toLowerCase();
-  return (
-    normalized === "start analysis" ||
-    normalized === "analyze" ||
-    normalized.includes("start analysis")
-  );
-}
-
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = messageInput.value.trim();
@@ -165,41 +153,16 @@ chatForm.addEventListener("submit", async (event) => {
   }
 
   if (!message && !uploadedPdfText) {
-    appendMessage("bot", "Type a message, or upload a resume PDF for skill-gap analysis.");
+    appendMessage("bot", "Type a message, or upload a resume PDF.");
     return;
   }
 
-  if (uploadedPdfText && message && !isAnalysisRequest(message)) {
-    appendMessage("user", message);
-    messageInput.value = "";
-    try {
-      const reply = await sendToBackend(message, "");
-      appendMessage("bot", reply);
-    } catch (error) {
-      appendMessage("bot", error.message || "Something went wrong.");
-    }
-    return;
-  }
-
-  if (uploadedPdfText) {
-    const displayMessage = message || "start analysis";
-    appendMessage("user", displayMessage);
-    messageInput.value = "";
-
-    try {
-      const reply = await sendToBackend("", uploadedPdfText);
-      appendMessage("bot", reply);
-    } catch (error) {
-      appendMessage("bot", error.message || "Something went wrong.");
-    }
-    return;
-  }
-
-  appendMessage("user", message);
+  const displayMessage = message || (uploadedPdfText ? "start analysis" : "");
+  appendMessage("user", displayMessage);
   messageInput.value = "";
 
   try {
-    const reply = await sendToBackend(message, "");
+    const reply = await sendToBackend(message, uploadedPdfText);
     appendMessage("bot", reply);
   } catch (error) {
     appendMessage("bot", error.message || "Something went wrong.");
