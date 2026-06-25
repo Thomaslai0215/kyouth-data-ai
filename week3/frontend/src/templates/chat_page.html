@@ -49,12 +49,27 @@
         />
         <button type="submit" class="send-btn">Send</button>
       </form>
+      <div class="upload-area">
+        <p id="upload-status" class="upload-status">No resume uploaded yet.</p>
+        <div id="resume-chip" class="resume-chip" hidden>
+          <span id="resume-chip-name"></span>
+          <button
+            type="button"
+            id="remove-resume-btn"
+            class="remove-resume-btn"
+            aria-label="Remove resume"
+            title="Remove resume"
+          >
+            ×
+          </button>
+        </div>
+      </div>
     </main>
 
     <script>
       window.BACKEND_URL = {{ backend_url | tojson }};
     </script>
     <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-    <script src="/static/chat.js"></script>
+    <script src="/static/chat.js?v=3"></script>
   </body>
 </html>

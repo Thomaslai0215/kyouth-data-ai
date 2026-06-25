@@ -3,3 +3,4 @@ __pycache__/
 .ruff_cache/
 .venv/
 .env
+secrets/google_api_key.txt

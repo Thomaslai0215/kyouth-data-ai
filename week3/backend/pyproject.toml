@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Week 3 backend chat API (FastAPI + Week 2 prompt_model)"
+description = "Week 3 backend chat API (FastAPI + Week 2 find_skill_gaps)"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [

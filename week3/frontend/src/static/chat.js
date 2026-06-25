@@ -3,6 +3,42 @@ const chatForm = document.getElementById("chat-form");
 const messageInput = document.getElementById("message-input");
 const pdfInput = document.getElementById("pdf-input");
 const uploadBtn = document.getElementById("upload-btn");
+const uploadStatus = document.getElementById("upload-status");
+const resumeChip = document.getElementById("resume-chip");
+const resumeChipName = document.getElementById("resume-chip-name");
+const removeResumeBtn = document.getElementById("remove-resume-btn");
+let uploadedPdfText = "";
+let uploadedPdfName = "";
+
+function setUploadStatus(text) {
+  if (uploadStatus) {
+    uploadStatus.textContent = text;
+    uploadStatus.hidden = false;
+  }
+  if (resumeChip) {
+    resumeChip.hidden = true;
+  }
+}
+
+function showResumeChip(name) {
+  uploadedPdfName = name;
+  if (resumeChipName) {
+    resumeChipName.textContent = name;
+  }
+  if (resumeChip) {
+    resumeChip.hidden = false;
+  }
+  if (uploadStatus) {
+    uploadStatus.hidden = true;
+  }
+}
+
+function clearResume() {
+  uploadedPdfText = "";
+  uploadedPdfName = "";
+  pdfInput.value = "";
+  setUploadStatus("No resume uploaded yet.");
+}
 
 function appendMessage(role, text) {
   const wrapper = document.createElement("div");
@@ -19,6 +55,40 @@ function appendMessage(role, text) {
 
 uploadBtn.addEventListener("click", () => {
   pdfInput.click();
+});
+
+removeResumeBtn?.addEventListener("click", clearResume);
+
+async function loadPdfFile(file) {
+  setUploadStatus(`Reading ${file.name}...`);
+  const pdfText = await extractPdfText(file);
+  if (!pdfText.trim()) {
+    throw new Error("Uploaded PDF has no readable text. Please use a text-based PDF.");
+  }
+
+  uploadedPdfText = pdfText;
+  showResumeChip(file.name);
+  appendMessage("user", `Uploaded resume: ${file.name}`);
+  appendMessage(
+    "bot",
+    'Resume ready. Type "start analysis" or press Send to run skill-gap analysis.'
+  );
+}
+
+pdfInput.addEventListener("change", async () => {
+  const file = pdfInput.files[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    await loadPdfFile(file);
+  } catch (error) {
+    clearResume();
+    appendMessage("bot", error.message || "Could not process the uploaded PDF.");
+  } finally {
+    pdfInput.value = "";
+  }
 });
 
 async function extractPdfText(file) {
@@ -66,28 +136,70 @@ async function sendToBackend(message, pdfText) {
   return await response.text();
 }
 
+function isAnalysisRequest(message) {
+  if (!message) {
+    return true;
+  }
+  const normalized = message.toLowerCase();
+  return (
+    normalized === "start analysis" ||
+    normalized === "analyze" ||
+    normalized.includes("start analysis")
+  );
+}
+
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-
   const message = messageInput.value.trim();
   const pdfFile = pdfInput.files[0];
 
-  if (!message && !pdfFile) {
+  if (!uploadedPdfText && pdfFile) {
+    try {
+      await loadPdfFile(pdfFile);
+    } catch (error) {
+      appendMessage("bot", error.message || "Could not process the uploaded PDF.");
+      return;
+    } finally {
+      pdfInput.value = "";
+    }
+  }
+
+  if (!message && !uploadedPdfText) {
+    appendMessage("bot", "Type a message, or upload a resume PDF for skill-gap analysis.");
     return;
   }
 
-  const displayMessage = message || "(PDF uploaded)";
-  appendMessage("user", displayMessage);
+  if (uploadedPdfText && message && !isAnalysisRequest(message)) {
+    appendMessage("user", message);
+    messageInput.value = "";
+    try {
+      const reply = await sendToBackend(message, "");
+      appendMessage("bot", reply);
+    } catch (error) {
+      appendMessage("bot", error.message || "Something went wrong.");
+    }
+    return;
+  }
+
+  if (uploadedPdfText) {
+    const displayMessage = message || "start analysis";
+    appendMessage("user", displayMessage);
+    messageInput.value = "";
+
+    try {
+      const reply = await sendToBackend("", uploadedPdfText);
+      appendMessage("bot", reply);
+    } catch (error) {
+      appendMessage("bot", error.message || "Something went wrong.");
+    }
+    return;
+  }
+
+  appendMessage("user", message);
   messageInput.value = "";
 
   try {
-    let pdfText = "";
-    if (pdfFile) {
-      pdfText = await extractPdfText(pdfFile);
-      pdfInput.value = "";
-    }
-
-    const reply = await sendToBackend(message, pdfText);
+    const reply = await sendToBackend(message, "");
     appendMessage("bot", reply);
   } catch (error) {
     appendMessage("bot", error.message || "Something went wrong.");

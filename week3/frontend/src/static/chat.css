@@ -73,6 +73,50 @@ body {
   background: #ffffff;
 }
 
+.upload-area {
+  min-height: 1.5rem;
+}
+
+.upload-status {
+  margin: 0;
+  padding: 0 0.25rem;
+  font-size: 0.9rem;
+  color: #666666;
+}
+
+.resume-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  border: 1px solid var(--chat-border);
+  border-radius: 999px;
+  background: #eef0ff;
+  color: #333333;
+  font-size: 0.9rem;
+}
+
+.remove-resume-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #666666;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.remove-resume-btn:hover {
+  background: #d8dcf8;
+  color: #222222;
+}
+
 .upload-btn {
   display: inline-flex;
   align-items: center;

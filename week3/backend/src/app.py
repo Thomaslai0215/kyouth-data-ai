@@ -1,5 +1,9 @@
 import os
 import sys
+import tempfile
+import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,12 +12,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 WEEK3_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 WEEK2_DIR = Path(__file__).resolve().parent / "week_2"
+DB_PATH = BACKEND_DIR / "data" / "jobs.db"
 
 load_dotenv(WEEK3_DIR / ".env")
 
+from secrets_util import apply_docker_secrets
+
+apply_docker_secrets()
+
 sys.path.insert(0, str(WEEK2_DIR))
-from prompt_model import prompt_model  # noqa: E402
+from find_skill_gaps import (  # noqa: E402
+    SkillGapResult,
+    find_skill_gaps,
+    format_skill_gap_result,
+)
 
 app = FastAPI()
 
@@ -37,29 +51,66 @@ class ChatResponse(BaseModel):
     reply: str
 
 
-def build_prompt(message: str, pdf_text: str) -> str:
-    parts: list[str] = []
-
-    if pdf_text.strip():
-        parts.append(f"Resume text:\n{pdf_text.strip()}")
-
-    if message.strip():
-        parts.append(f"User message:\n{message.strip()}")
-
-    if not parts:
-        return "Say hello briefly as a resume helper chatbot."
-
-    return (
-        "\n\n".join(parts)
-        + "\n\nReply helpfully as a resume assistant. Keep the answer concise."
+def chat_with_model(message: str) -> str:
+    model = os.getenv("CHAT_MODEL", "llama3.1")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+    prompt = message.strip() or "Say hello briefly."
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
+    request = urllib.request.Request(
+        f"{base_url}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode())
+        text = data.get("response", "").strip()
+        return text or "I could not generate a reply right now."
+    except urllib.error.HTTPError as exc:
+        return f"[Chat model error] {exc.code} {exc.reason}"
+    except urllib.error.URLError as exc:
+        return f"[Chat model error] {exc.reason}"
+    except Exception as exc:
+        return f"[Chat model error] {exc}"
+
+
+def run_skill_gap_analysis(resume_text: str) -> SkillGapResult:
+    if not DB_PATH.is_file():
+        return SkillGapResult(gaps=[], demand_statistics={}, total_tokens=0, time_ms=0.0)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(resume_text)
+        tmp_path = tmp.name
+
+    try:
+        return find_skill_gaps(tmp_path, str(DB_PATH))
+    finally:
+        os.unlink(tmp_path)
 
 
 def handle_chat(request: ChatRequest) -> ChatResponse:
-    prompt = build_prompt(request.message, request.pdf_text)
-    model = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
-    reply = prompt_model(model, prompt)
-    return ChatResponse(reply=reply)
+    resume_text = request.pdf_text.strip()
+    message = request.message.strip()
+
+    if not resume_text:
+        if not message:
+            return ChatResponse(
+                reply="Send a message to chat, or upload a resume PDF for skill-gap analysis."
+            )
+        return ChatResponse(reply=chat_with_model(message))
+
+    result = run_skill_gap_analysis(resume_text)
+    if not result.gaps:
+        return ChatResponse(
+            reply=(
+                "No skill gaps found. Make sure the jobs database has tagged tech_stack values."
+            )
+        )
+    return ChatResponse(reply=format_skill_gap_result(result))
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -69,5 +120,4 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat_api_alias(request: ChatRequest) -> ChatResponse:
-    """Alias so existing BACKEND_URL values still work."""
     return handle_chat(request)
