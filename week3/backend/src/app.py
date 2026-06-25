@@ -92,25 +92,47 @@ def run_skill_gap_analysis(resume_text: str) -> SkillGapResult:
         os.unlink(tmp_path)
 
 
+def wants_skill_gap(message: str) -> bool:
+    """Empty message or explicit analysis request → run find_skill_gaps."""
+    if not message:
+        return True
+    text = message.lower()
+    return "start analysis" in text or "skill gap" in text or text == "analyze"
+
+
+def chat_about_resume(resume_text: str, message: str) -> str:
+    question = message or "Summarize this resume briefly."
+    prompt = (
+        f"Resume text:\n{resume_text[:3000]}\n\n"
+        f"User question: {question}\n\n"
+        "Answer using only the resume above."
+    )
+    return chat_with_model(prompt)
+
+
 def handle_chat(request: ChatRequest) -> ChatResponse:
     resume_text = request.pdf_text.strip()
     message = request.message.strip()
 
+    if not resume_text and not message:
+        return ChatResponse(
+            reply="Send a message to chat, or upload a resume PDF."
+        )
+
     if not resume_text:
-        if not message:
-            return ChatResponse(
-                reply="Send a message to chat, or upload a resume PDF for skill-gap analysis."
-            )
         return ChatResponse(reply=chat_with_model(message))
 
-    result = run_skill_gap_analysis(resume_text)
-    if not result.gaps:
-        return ChatResponse(
-            reply=(
-                "No skill gaps found. Make sure the jobs database has tagged tech_stack values."
+    if wants_skill_gap(message):
+        result = run_skill_gap_analysis(resume_text)
+        if not result.gaps:
+            return ChatResponse(
+                reply=(
+                    "No skill gaps found. Make sure the jobs database has tagged tech_stack values."
+                )
             )
-        )
-    return ChatResponse(reply=format_skill_gap_result(result))
+        return ChatResponse(reply=format_skill_gap_result(result))
+
+    return ChatResponse(reply=chat_about_resume(resume_text, message))
 
 
 @app.post("/chat", response_model=ChatResponse)

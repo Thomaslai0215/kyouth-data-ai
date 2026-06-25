@@ -4,6 +4,8 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, List
 
@@ -19,8 +21,8 @@ RESUME_PATH = str(DATA_DIR / "resume_d3.txt")
 
 load_dotenv(BACKEND_DIR.parent / ".env")
 
-GEMINI_MODEL = "gemini-3.1-flash-lite"
-
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.1-flash-lite")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 
 class SkillGapResult(BaseModel):
     gaps: List[str]
@@ -67,6 +69,67 @@ def is_jailbreak_attempt(text: str) -> bool:
     return any(phrase in text_lower for phrase in suspicious)
 
 
+def is_gemini_model(model: str) -> bool:
+    return model.startswith("gemini-")
+
+
+def build_extraction_prompt(resume_text: str) -> str:
+    return f"""
+        Extract only the hard technical skills (programming languages, frameworks, cloud platforms, tools) from the following resume.
+        Ignore soft skills like 'leadership', 'management', and ignore certifications.
+        Return JSON with one key: "technical_skills" (a list of strings).
+        <resume>
+        {resume_text}
+        </resume>
+        """
+
+
+def extract_skills_with_gemini(model: str, prompt: str) -> tuple[list[str], int]:
+    client = genai.Client()
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ResumeExtraction,
+            temperature=0.0,
+        ),
+    )
+    if response.usage_metadata:
+        tokens = response.usage_metadata.total_token_count
+    else:
+        tokens = len(prompt.split()) * 4
+    result_dict = json.loads(response.text)
+    return result_dict.get("technical_skills", []), tokens
+
+
+def extract_skills_with_ollama(model: str, prompt: str) -> tuple[list[str], int]:
+    payload = json.dumps(
+        {"model": model, "prompt": prompt, "stream": False, "format": "json"}
+    ).encode()
+    request = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        data = json.loads(response.read().decode())
+    text = data.get("response", "").strip()
+    if not text:
+        raise ValueError("Empty response from Ollama.")
+    result_dict = json.loads(text)
+    tokens = len(prompt.split()) * 4
+    return result_dict.get("technical_skills", []), tokens
+
+
+def extract_resume_skills(resume_text: str) -> tuple[list[str], int]:
+    prompt = build_extraction_prompt(resume_text)
+    if is_gemini_model(CHAT_MODEL):
+        return extract_skills_with_gemini(CHAT_MODEL, prompt)
+    return extract_skills_with_ollama(CHAT_MODEL, prompt)
+
+
 def find_skill_gaps(input_file_path: str, db_url: str) -> SkillGapResult:
     start_time = time.time()
     total_tokens = 0
@@ -85,43 +148,22 @@ def find_skill_gaps(input_file_path: str, db_url: str) -> SkillGapResult:
                 r"[^a-zA-Z0-9.,/\s]", "", resume_text
             )
 
-        client = genai.Client()
-        prompt = f"""
-        Extract only the hard technical skills (programming languages, frameworks, cloud platforms, tools) from the following resume.
-        Ignore soft skills like 'leadership', 'management', and ignore certifications.
-        <resume>
-        {resume_text}
-        </resume>
-        """
-
         resume_skills_raw: list[str] = []
         attempts = 0
         while attempts < max_retries:
             try:
                 attempts += 1
-                response = client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=ResumeExtraction,
-                        temperature=0.0,
-                    ),
-                )
-
-                if response.usage_metadata:
-                    total_tokens += response.usage_metadata.total_token_count
-                else:
-                    total_tokens += len(prompt.split()) * 4
-
-                result_dict = json.loads(response.text)
-                resume_skills_raw = result_dict.get("technical_skills", [])
+                skills, tokens_used = extract_resume_skills(resume_text)
+                resume_skills_raw = skills
+                total_tokens += tokens_used
                 break
             except Exception as e:
                 if attempts == max_retries:
-                    print(f"LLM extraction failed after {max_retries} attempts: {e}")
+                    print(
+                        f"LLM extraction failed after {max_retries} attempts "
+                        f"(model={CHAT_MODEL}): {e}"
+                    )
                 time.sleep(retry_wait)
-
         conn = sqlite3.connect(db_url)
         cursor = conn.cursor()
         cursor.execute("SELECT tech_stack FROM jobs WHERE tech_stack IS NOT NULL")
