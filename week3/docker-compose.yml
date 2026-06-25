@@ -1,19 +1,28 @@
 services:
   frontend:
-    build: ./frontend
+    image: frontend:1.0
+    pull_policy: build
+    build:
+      context: ./frontend
+    # Host port (left) must match FRONTEND_PORT in .env
     ports:
-      - "8000:8000"
+      - "${FRONTEND_PORT:-8000}:8000"
     environment:
-      BACKEND_URL: http://localhost:8001/chat
+      # Port in BACKEND_URL must match BACKEND_PORT in .env / backend ports (left side)
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8001/chat}
     depends_on:
       - backend
 
   backend:
-    build: ./backend
+    image: backend:1.0
+    pull_policy: build
+    build:
+      context: ./backend
+    # Host port (left) must match BACKEND_PORT in .env and the port in BACKEND_URL
     ports:
-      - "8001:8001"
+      - "${BACKEND_PORT:-8001}:8001"
     environment:
-      CHAT_MODEL: ${CHAT_MODEL:-gemini-2.5-flash}
+      CHAT_MODEL: ${CHAT_MODEL:-gemini-3.1-flash-lite}
       OLLAMA_BASE_URL: http://ollama:11434
     secrets:
       - google_api_key
