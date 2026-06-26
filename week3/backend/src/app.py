@@ -17,6 +17,7 @@ WEEK2_DIR = Path(__file__).resolve().parent / "week_2"
 DB_PATH = BACKEND_DIR / "data" / "jobs.db"
 
 load_dotenv(WEEK3_DIR / ".env")
+FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8000")
 
 from secrets_util import apply_docker_secrets
 
@@ -34,8 +35,8 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
+        f"http://localhost:{FRONTEND_PORT}",
+        f"http://127.0.0.1:{FRONTEND_PORT}",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
